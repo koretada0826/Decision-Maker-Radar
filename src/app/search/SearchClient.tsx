@@ -1,0 +1,441 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { MapPin, Tag, X } from "lucide-react";
+import { LeadCard } from "./LeadCard";
+import { PickerModal, type PickerOption } from "./PickerModal";
+import {
+  getPurchasedIds,
+  setPurchasedIds,
+  getStoredEmail,
+  setStoredEmail,
+} from "@/lib/purchases";
+import type { Lead } from "@/lib/types";
+
+const STORAGE_KEY = "kr-uploaded-leads-v2";
+
+export function SearchClient({ initial }: { initial: Lead[] }) {
+  const [uploaded, setUploaded] = useState<Lead[]>([]);
+  const [areas, setAreas] = useState<Set<string>>(new Set());
+  const [industries, setIndustries] = useState<Set<string>>(new Set());
+  const [highOnly, setHighOnly] = useState(false);
+  const [purchasedOnly, setPurchasedOnly] = useState(false);
+  const [picker, setPicker] = useState<"area" | "industry" | null>(null);
+  const [purchasedIds, setLocalPurchasedIds] = useState<Set<string>>(new Set());
+
+  // /admin から戻ってきた時、/success から戻ってきた時に再読込
+  useEffect(() => {
+    function refresh() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        setUploaded(raw ? (JSON.parse(raw) as Lead[]) : []);
+      } catch {}
+      setLocalPurchasedIds(new Set(getPurchasedIds()));
+    }
+    refresh();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("storage", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("storage", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
+
+  // メアドが保存されていれば、サーバー（Supabase）から購入履歴を同期
+  useEffect(() => {
+    const email = getStoredEmail();
+    if (!email) return;
+    fetch(`/api/purchases?email=${encodeURIComponent(email)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.ok || !data.purchases) return;
+        type P = {
+          lead_id: string;
+          company_name: string;
+          address: string | null;
+          ward: string | null;
+          industry: string | null;
+          phone: string | null;
+          memo: string | null;
+          rank: string;
+          score: number | null;
+          contact_time: string | null;
+          contact_person_type: string | null;
+          call_result: string | null;
+        };
+        const purchases = data.purchases as P[];
+        const serverIds = new Set(purchases.map((p) => p.lead_id));
+        // localStorage に保存
+        setPurchasedIds(Array.from(serverIds));
+        setLocalPurchasedIds(serverIds);
+        // 元データが localStorage に無いリードは「購入したけど取り込み済み未登録」状態
+        // → サーバーのスナップショットから復元してリストに表示する
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          const current: Lead[] = raw ? JSON.parse(raw) : [];
+          const existingIds = new Set(current.map((l) => l.id));
+          const restored: Lead[] = purchases
+            .filter((p) => !existingIds.has(p.lead_id))
+            .map((p) => ({
+              id: p.lead_id,
+              company_name: p.company_name,
+              address: p.address ?? "",
+              ward: p.ward ?? "",
+              industry: p.industry,
+              phone: p.phone,
+              rank: (p.rank ?? "D") as Lead["rank"],
+              score: p.score ?? 0,
+              contact_time: p.contact_time ?? new Date().toISOString(),
+              contact_person_type:
+                (p.contact_person_type ??
+                  "decision_maker") as Lead["contact_person_type"],
+              call_result: (p.call_result ??
+                "other") as Lead["call_result"],
+              memo: p.memo,
+              source: "csv",
+            }));
+          if (restored.length > 0) {
+            const merged = [...restored, ...current];
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+            setUploaded(merged);
+          }
+        } catch {}
+      })
+      .catch(() => {});
+  }, []);
+
+  async function restorePurchases() {
+    const email = window.prompt(
+      "購入時にStripeで入力したメールアドレスを入力してください：",
+    );
+    if (!email) return;
+    try {
+      const res = await fetch(
+        `/api/purchases?email=${encodeURIComponent(email.trim())}`,
+      );
+      const data = await res.json();
+      if (!data.ok) {
+        alert(
+          data.reason === "supabase_not_configured"
+            ? "サーバー設定が未完了です。Supabaseが必要です。"
+            : `エラー: ${data.reason ?? "不明"}`,
+        );
+        return;
+      }
+      if (!data.purchases || data.purchases.length === 0) {
+        alert("該当する購入履歴が見つかりませんでした。");
+        return;
+      }
+      setStoredEmail(email.trim());
+      alert(
+        `${data.purchases.length} 件の購入履歴を復元しました。ページを再読み込みします。`,
+      );
+      window.location.reload();
+    } catch (e) {
+      alert(`エラー: ${(e as Error).message}`);
+    }
+  }
+
+  const all = useMemo(() => [...uploaded, ...initial], [uploaded, initial]);
+
+  // 業種・区の集計（ピッカー用）
+  const industryOptions = useMemo<PickerOption[]>(() => {
+    const m = new Map<string, number>();
+    for (const l of all) {
+      if (!l.industry) continue;
+      m.set(l.industry, (m.get(l.industry) ?? 0) + 1);
+    }
+    return Array.from(m.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([value, count]) => ({ value, count }));
+  }, [all]);
+
+  const areaOptions = useMemo<PickerOption[]>(() => {
+    const m = new Map<string, number>();
+    for (const l of all) {
+      if (!l.ward) continue;
+      m.set(l.ward, (m.get(l.ward) ?? 0) + 1);
+    }
+    return Array.from(m.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([value, count]) => ({ value, count }));
+  }, [all]);
+
+  // 絞り込み（業種ORxエリアORで AND）
+  const results = useMemo(() => {
+    return all
+      .filter((l) =>
+        industries.size === 0
+          ? true
+          : l.industry !== null && industries.has(l.industry),
+      )
+      .filter((l) => (areas.size === 0 ? true : areas.has(l.ward)))
+      .filter((l) => (highOnly ? l.rank === "S" || l.rank === "A" : true))
+      .filter((l) => (purchasedOnly ? purchasedIds.has(l.id) : true))
+      .sort((a, b) => b.score - a.score);
+  }, [all, industries, areas, highOnly, purchasedOnly, purchasedIds]);
+
+  function removeArea(v: string) {
+    setAreas((s) => {
+      const n = new Set(s);
+      n.delete(v);
+      return n;
+    });
+  }
+  function removeIndustry(v: string) {
+    setIndustries((s) => {
+      const n = new Set(s);
+      n.delete(v);
+      return n;
+    });
+  }
+
+  return (
+    <div className="min-h-screen pb-16">
+      {/* ヘッダー */}
+      <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800">
+        <div className="px-4 h-14 flex items-center gap-2">
+          <div className="font-bold tracking-wide">決裁者レーダー</div>
+          <button
+            onClick={restorePurchases}
+            className="ml-auto text-white/70 text-[10px] underline hover:text-white"
+            title="別端末・キャッシュクリア後の復元"
+          >
+            購入を復元
+          </button>
+          <span className="inline-flex items-center gap-1.5 h-7 px-2 bg-white/10 text-white text-[11px] tabular-nums">
+            <span className="text-white/60 uppercase tracking-wider text-[10px]">
+              Owned
+            </span>
+            {purchasedIds.size} / {all.length}
+          </span>
+        </div>
+      </header>
+
+      {/* 2大ボタン（エリア / 業種） */}
+      <div className="sticky top-14 z-20 bg-white border-b border-slate-200 px-3 py-3">
+        <div className="grid grid-cols-2 gap-2">
+          <FilterButton
+            icon={<MapPin size={18} />}
+            label="エリア"
+            count={areas.size}
+            summary={summaryFromSet(areas)}
+            color="emerald"
+            onClick={() => setPicker("area")}
+          />
+          <FilterButton
+            icon={<Tag size={18} />}
+            label="業種"
+            count={industries.size}
+            summary={summaryFromSet(industries)}
+            color="sky"
+            onClick={() => setPicker("industry")}
+          />
+        </div>
+
+        {/* 選択チップ */}
+        {(areas.size > 0 || industries.size > 0) && (
+          <div className="mt-2 flex gap-1.5 flex-wrap">
+            {Array.from(areas).map((v) => (
+              <Chip
+                key={`a-${v}`}
+                category="エリア"
+                value={v}
+                onRemove={() => removeArea(v)}
+              />
+            ))}
+            {Array.from(industries).map((v) => (
+              <Chip
+                key={`i-${v}`}
+                category="業種"
+                value={v}
+                onRemove={() => removeIndustry(v)}
+              />
+            ))}
+            <button
+              onClick={() => {
+                setAreas(new Set());
+                setIndustries(new Set());
+              }}
+              className="text-[11px] text-slate-500 underline self-center"
+            >
+              全てクリア
+            </button>
+          </div>
+        )}
+
+        {/* 結果バー */}
+        <div className="mt-2 flex items-center text-xs text-slate-600 gap-3">
+          <span>
+            <span className="font-semibold text-slate-900">
+              {results.length}
+            </span>{" "}
+            件 / 全 {all.length} 件
+          </span>
+          <label className="ml-auto inline-flex items-center gap-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={highOnly}
+              onChange={(e) => setHighOnly(e.target.checked)}
+              className="accent-brand-700"
+            />
+            <span>S/Aのみ</span>
+          </label>
+          <label className="inline-flex items-center gap-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={purchasedOnly}
+              onChange={(e) => setPurchasedOnly(e.target.checked)}
+              className="accent-emerald-600"
+            />
+            <span>購入済のみ</span>
+          </label>
+        </div>
+      </div>
+
+      {/* 取込分のバッジ（クリアは/admin側） */}
+      {uploaded.length > 0 && (
+        <div className="px-3 pt-2 text-[11px] text-slate-500 flex items-center gap-2">
+          <span className="inline-block bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5">
+            CSV取込分 {uploaded.length} 件を表示中
+          </span>
+        </div>
+      )}
+
+      {/* リスト */}
+      <section className="px-3 py-3 space-y-2 max-w-3xl mx-auto">
+        {results.length === 0 ? (
+          all.length === 0 ? (
+            <div className="text-center py-16 text-slate-500 text-sm">
+              <div className="text-4xl mb-2">📋</div>
+              リードがまだありません。
+              <br />
+              管理者が CSV を取り込むとここに表示されます。
+            </div>
+          ) : (
+            <div className="text-center py-16 text-slate-500 text-sm">
+              <div className="text-4xl mb-2">🔍</div>
+              該当するリードがありません。
+              <br />
+              上のボタンから条件を変えてください。
+            </div>
+          )
+        ) : (
+          results.map((l) => (
+            <LeadCard
+              key={l.id}
+              lead={l}
+              purchased={purchasedIds.has(l.id)}
+            />
+          ))
+        )}
+      </section>
+
+      {/* ピッカーモーダル */}
+      {picker === "area" && (
+        <PickerModal
+          kind="area"
+          options={areaOptions}
+          selected={areas}
+          onChange={setAreas}
+          onClose={() => setPicker(null)}
+        />
+      )}
+      {picker === "industry" && (
+        <PickerModal
+          kind="industry"
+          options={industryOptions}
+          selected={industries}
+          onChange={setIndustries}
+          onClose={() => setPicker(null)}
+        />
+      )}
+
+    </div>
+  );
+}
+
+function summaryFromSet(s: Set<string>): string {
+  if (s.size === 0) return "未指定";
+  const arr = Array.from(s);
+  if (arr.length === 1) return arr[0];
+  return `${arr[0]} 他 ${arr.length - 1} 件`;
+}
+
+function FilterButton({
+  icon,
+  label,
+  count,
+  summary,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  summary: string;
+  color?: "emerald" | "sky";
+  onClick: () => void;
+}) {
+  const active = count > 0;
+  return (
+    <button
+      onClick={onClick}
+      className={`h-14 px-3 border text-left flex items-center gap-2 transition-colors ${
+        active
+          ? "border-slate-900 bg-white"
+          : "border-slate-200 bg-white hover:border-slate-400"
+      }`}
+    >
+      <span
+        className={`shrink-0 w-9 h-9 inline-flex items-center justify-center ${
+          active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"
+        }`}
+      >
+        {icon}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[10px] text-slate-500 uppercase tracking-wider leading-none">
+          {label}
+        </span>
+        <span
+          className={`block text-sm font-bold truncate mt-1 ${
+            active ? "text-slate-900" : "text-slate-400"
+          }`}
+        >
+          {summary}
+        </span>
+      </span>
+      {count > 0 && (
+        <span className="shrink-0 inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 text-[11px] font-bold text-white bg-slate-900 tabular-nums">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function Chip({
+  category,
+  value,
+  onRemove,
+}: {
+  color?: "emerald" | "sky";
+  category: string;
+  value: string;
+  onRemove: () => void;
+}) {
+  return (
+    <button
+      onClick={onRemove}
+      className="inline-flex items-center gap-1 h-7 pl-2 pr-1.5 bg-slate-900 text-white text-xs font-semibold"
+    >
+      <span className="text-[10px] opacity-60 uppercase tracking-wider">
+        {category}
+      </span>
+      <span>{value}</span>
+      <X size={12} />
+    </button>
+  );
+}
