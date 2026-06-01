@@ -15,6 +15,9 @@ const PUBLIC_PATHS = [
   "/api/stripe",
   "/api/purchases",
   "/api/sample-csv",
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/icons",
 ];
 
 function supabaseConfigured() {
