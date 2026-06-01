@@ -38,6 +38,7 @@ export function supabaseReady() {
 export async function upsertPurchase(input: {
   email: string;
   leadId: string;
+  dedupKey?: string;
   snapshot: LeadSnapshot;
   stripeSessionId?: string;
   stripePaymentIntent?: string | null;
@@ -52,6 +53,7 @@ export async function upsertPurchase(input: {
     {
       email: input.email,
       lead_id: input.leadId,
+      dedup_key: input.dedupKey ?? null,
       company_name: input.snapshot.company_name ?? "",
       address: input.snapshot.address ?? null,
       ward: input.snapshot.ward ?? null,
@@ -73,6 +75,66 @@ export async function upsertPurchase(input: {
   );
   if (error) return { ok: false, reason: error.message };
   return { ok: true };
+}
+
+// 重複購入チェック：このメアドが既にこのdedup_keyを買っているか
+export async function hasAlreadyPurchased(opts: {
+  email: string;
+  dedupKey: string;
+}) {
+  if (!supabaseReady()) {
+    return { ok: false as const, reason: "supabase_not_configured" };
+  }
+  if (!opts.email || !opts.dedupKey) {
+    return { ok: true as const, alreadyPurchased: false };
+  }
+  const supabase = createSupabaseServiceRole();
+  const { data, error } = await supabase
+    .from("purchases")
+    .select("id, company_name, created_at")
+    .eq("email", opts.email.toLowerCase().trim())
+    .eq("dedup_key", opts.dedupKey)
+    .eq("status", "completed")
+    .limit(1);
+  if (error) return { ok: false as const, reason: error.message };
+  if (data && data.length > 0) {
+    return {
+      ok: true as const,
+      alreadyPurchased: true,
+      previousPurchase: data[0],
+    };
+  }
+  return { ok: true as const, alreadyPurchased: false };
+}
+
+export async function deletePurchase(opts: {
+  email: string;
+  leadId: string;
+}) {
+  if (!supabaseReady()) {
+    return { ok: false as const, reason: "supabase_not_configured" };
+  }
+  const supabase = createSupabaseServiceRole();
+  const { error, count } = await supabase
+    .from("purchases")
+    .delete({ count: "exact" })
+    .eq("email", opts.email.toLowerCase().trim())
+    .eq("lead_id", opts.leadId);
+  if (error) return { ok: false as const, reason: error.message };
+  return { ok: true as const, deleted: count ?? 0 };
+}
+
+export async function deleteAllPurchasesByEmail(email: string) {
+  if (!supabaseReady()) {
+    return { ok: false as const, reason: "supabase_not_configured" };
+  }
+  const supabase = createSupabaseServiceRole();
+  const { error, count } = await supabase
+    .from("purchases")
+    .delete({ count: "exact" })
+    .eq("email", email.toLowerCase().trim());
+  if (error) return { ok: false as const, reason: error.message };
+  return { ok: true as const, deleted: count ?? 0 };
 }
 
 export async function listPurchasesByEmail(email: string) {

@@ -12,8 +12,10 @@ import {
   cleanIndustry,
   decodeBuffer,
   getAddress2,
+  findSizeColumn,
   type ColumnMap,
 } from "@/lib/csv-mapping";
+import { makeDedupKey } from "@/lib/utils";
 import type {
   CallResult,
   CallTemperature,
@@ -158,6 +160,7 @@ export function CsvUploadDialog({
         const rows = res.data ?? [];
         const headers = res.meta?.fields ?? [];
         const colMap = buildColumnMap(headers);
+        const sizeCol = findSizeColumn(headers);
         const notes: string[] = [];
 
         if (encoding === "shift_jis") {
@@ -267,13 +270,17 @@ export function CsvUploadDialog({
             complaint_risk: risk,
           });
 
+          const phoneVal = getCell(r, colMap, "phone") || null;
+          const sizeVal = sizeCol ? (r[sizeCol] ?? "").toString().trim() || null : null;
           leads.push({
             id: `csv-${Date.now()}-${i}`,
+            dedup_key: makeDedupKey(companyName, phoneVal),
             company_name: companyName,
             address,
             ward,
             industry,
-            phone: getCell(r, colMap, "phone") || null,
+            size: sizeVal,
+            phone: phoneVal,
             rank,
             score,
             contact_time: d.toISOString(),
@@ -305,18 +312,28 @@ export function CsvUploadDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[2000] bg-black/50 flex items-end md:items-center justify-center p-0 md:p-4">
-      <div className="bg-white rounded-t-2xl md:rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 sticky top-0 bg-white">
-          <h2 className="font-bold">CSVをアップロード</h2>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="csv-title"
+      className="fixed inset-0 z-[2000] bg-black/50 flex items-end md:items-center justify-center p-0 md:p-4"
+      onClick={(e) => {
+        if (!loading && e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white rounded-t-2xl md:rounded-2xl shadow-xl w-full max-w-lg max-h-[90dvh] flex flex-col">
+        <div className="shrink-0 flex items-center justify-between p-4 border-b border-slate-200">
+          <h2 id="csv-title" className="font-bold">CSVをアップロード</h2>
           <button
             onClick={onClose}
-            className="rounded-full p-1 hover:bg-slate-100"
+            disabled={loading}
+            className="inline-flex items-center justify-center w-11 h-11 rounded-full hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40"
             aria-label="閉じる"
           >
             <X size={18} />
           </button>
         </div>
+        <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-3 text-sm">
           <p className="text-slate-600">
             業務で使っているCSV（日本語の列名OK）をそのまま取り込めます。会社名・住所・電話番号・業種・担当者・結果・備考などの列を自動認識します。
@@ -375,8 +392,10 @@ export function CsvUploadDialog({
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) handleFile(f);
+                // 同名ファイル再選択を可能にする
+                e.target.value = "";
               }}
-              className="block w-full text-sm file:mr-4 file:h-11 file:px-4 file:rounded-xl file:border-0 file:bg-brand-700 file:text-white file:font-semibold"
+              className="block w-full text-sm file:mr-4 file:h-11 file:px-4 file:rounded-lg file:border-0 file:bg-slate-900 file:text-white file:font-semibold"
             />
           </label>
 
@@ -402,16 +421,7 @@ export function CsvUploadDialog({
                 <div className="text-xs mt-1">
                   総行数 {summary.total} / クレーム等で除外 {summary.excluded} / 必須項目エラー {summary.errors}
                 </div>
-                {summary.added > 0 && (
-                  <div className="mt-3 flex justify-center">
-                    <button
-                      onClick={onClose}
-                      className="inline-flex items-center justify-center h-11 px-6 rounded-lg bg-emerald-600 text-white font-bold active:bg-emerald-700"
-                    >
-                      リストで確認する
-                    </button>
-                  </div>
-                )}
+                {/* リスト確認ボタンは sticky フッターへ移動済み */}
               </div>
 
               {summary.notes.length > 0 && (
@@ -457,6 +467,18 @@ export function CsvUploadDialog({
             </>
           )}
         </div>
+        </div>
+        {/* sticky フッター */}
+        {summary && summary.added > 0 && (
+          <div className="shrink-0 border-t border-slate-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <button
+              onClick={onClose}
+              className="w-full h-12 rounded-lg bg-emerald-600 text-white font-bold active:bg-emerald-700 active:scale-[0.99] transition-transform"
+            >
+              リストで確認する（{summary.added}件）
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

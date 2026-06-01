@@ -68,6 +68,7 @@ export async function POST(req: Request) {
   const result = await upsertPurchase({
     email,
     leadId: metadata.lead_id,
+    dedupKey: metadata.lead_dedup_key || undefined,
     snapshot: {
       company_name: metadata.lead_company_name ?? metadata.lead_name ?? "",
       address: metadata.lead_address || null,
@@ -98,5 +99,6 @@ export async function POST(req: Request) {
     ok: true,
     email,
     lead_id: metadata.lead_id,
+    dedup_key: metadata.lead_dedup_key || null,
   });
 }

@@ -186,6 +186,33 @@ const COL_ALIASES: Record<CsvTargetKey, string[]> = {
   ],
 };
 
+// 規模感の列名（任意列）
+export const SIZE_ALIASES = [
+  "size",
+  "規模",
+  "規模感",
+  "会社規模",
+  "従業員数",
+  "従業員",
+  "資本金",
+  "売上",
+];
+
+export function findSizeColumn(headers: string[]): string | null {
+  const normHeaders = headers.map((h) => ({ raw: h, n: normHeader(h) }));
+  for (const a of SIZE_ALIASES.map(normHeader)) {
+    const hit = normHeaders.find((h) => h.n === a);
+    if (hit) return hit.raw;
+  }
+  for (const a of SIZE_ALIASES.map(normHeader)) {
+    const hit = normHeaders.find(
+      (h) => h.n.length >= 2 && (h.n.includes(a) || a.includes(h.n)),
+    );
+    if (hit) return hit.raw;
+  }
+  return null;
+}
+
 export type ColumnMap = Partial<Record<CsvTargetKey, string>>;
 
 export function buildColumnMap(headers: string[]): ColumnMap {

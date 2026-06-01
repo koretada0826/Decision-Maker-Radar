@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, ArrowRight, AlertTriangle } from "lucide-react";
-import { addPurchasedId, setStoredEmail } from "@/lib/purchases";
+import {
+  addPurchasedId,
+  addPurchasedDedupKey,
+  setStoredEmail,
+} from "@/lib/purchases";
 
 export function SuccessClient({
   leadId,
@@ -24,12 +28,27 @@ export function SuccessClient({
   const [persisted, setPersisted] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (leadId) {
+    // デモモードだけは URL の leadId をそのまま信用（決済は走ってないため）
+    if (isDemo && leadId) {
       addPurchasedId(leadId);
+      try {
+        const raw = localStorage.getItem("kr-uploaded-leads-v2");
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            const lead = list.find(
+              (l: { id?: string; dedup_key?: string }) => l?.id === leadId,
+            );
+            if (lead?.dedup_key) addPurchasedDedupKey(lead.dedup_key);
+          }
+        }
+      } catch {}
       setRegistered(true);
+      return;
     }
-    // Stripe Webhook が遅延 or 失敗した場合の保険として、
-    // /success に到達したクライアントが直接 Supabase に書き込みを依頼する
+
+    // 本番：Stripe session を必ずサーバーで検証してから購入登録する。
+    // URL の leadId は信用しない（改竄可能）。
     if (sessionId && !isDemo) {
       fetch("/api/purchases/record", {
         method: "POST",
@@ -38,9 +57,13 @@ export function SuccessClient({
       })
         .then((r) => r.json())
         .then((data) => {
-          if (data.ok && data.email) {
+          if (data.ok && data.email && data.lead_id) {
+            // サーバーが返した lead_id だけを信用
+            addPurchasedId(data.lead_id);
+            if (data.dedup_key) addPurchasedDedupKey(data.dedup_key);
             setStoredEmail(data.email);
             setPersisted(true);
+            setRegistered(true);
           } else {
             setPersisted(false);
           }
@@ -116,7 +139,7 @@ export function SuccessClient({
 
         <Link
           href="/search"
-          className="mt-6 inline-flex items-center justify-center gap-2 w-full h-12 rounded-xl bg-brand-700 text-white font-bold active:bg-brand-600"
+          className="mt-6 inline-flex items-center justify-center gap-2 w-full h-12 rounded-lg bg-slate-900 text-white font-bold active:bg-slate-800 active:scale-[0.99] transition-transform"
         >
           リストに戻る
           <ArrowRight size={16} />

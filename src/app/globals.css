@@ -17,9 +17,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* iOS の input/select フォーカス時の自動ズームを抑止（16px 未満はズームされる） */
 input,
 select,
-textarea,
+textarea {
+  font-size: 16px;
+}
+
 button {
   font: inherit;
+  /* Safari の薄ボタン化を防ぐ */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* iOS のホームバー領域を考慮するヘルパー */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* タップターゲット最小 44px の補助クラス */
+.tap {
+  min-width: 44px;
+  min-height: 44px;
 }

@@ -14,6 +14,7 @@ const PUBLIC_PATHS = [
   "/success",
   "/api/stripe",
   "/api/purchases",
+  "/api/sample-csv",
 ];
 
 function supabaseConfigured() {

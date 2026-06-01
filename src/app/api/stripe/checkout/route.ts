@@ -2,6 +2,16 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { findPlan } from "@/lib/plans";
 import { LEAD_PRICE_JPY } from "@/lib/purchases";
+import {
+  HOTNESS_PRICE,
+  computeHotness,
+  priceFor,
+  type HotnessRank,
+} from "@/lib/hotness";
+import {
+  hasAlreadyPurchased,
+  supabaseReady,
+} from "@/lib/purchases-server";
 
 function stripeConfigured() {
   const key = process.env.STRIPE_SECRET_KEY ?? "";
@@ -43,11 +53,29 @@ function snapshotToMetadata(s?: LeadSnapshotBody): Record<string, string> {
   };
 }
 
+function resolvePrice(
+  hotness: HotnessRank,
+  isRepurchase: boolean,
+): { price: number; label: string } {
+  const price = priceFor(hotness, isRepurchase);
+  const label =
+    hotness === "platinum"
+      ? "プラチナ"
+      : hotness === "emerald"
+        ? "エメラルド"
+        : "シルバー";
+  return { price, label: `${label}${isRepurchase ? "（更新版 半額）" : ""}` };
+}
+
 export async function POST(req: Request) {
   let body: {
     planId?: string;
     leadId?: string;
     leadName?: string;
+    hotness?: HotnessRank;
+    isRepurchase?: boolean;
+    dedupKey?: string;
+    email?: string;
     leadSnapshot?: LeadSnapshotBody;
   };
   try {
@@ -68,14 +96,34 @@ export async function POST(req: Request) {
 
   if (body.leadId) {
     const name = body.leadName?.trim() || "リード";
+
+    // === セキュリティ：価格はサーバーで再計算する ===
+    // フロント送信の hotness / isRepurchase は信用せず、
+    // contact_time から hotness を、Supabaseの履歴から isRepurchase を再判定する。
+    const contactTime = body.leadSnapshot?.contact_time;
+    const serverHotness: HotnessRank = contactTime
+      ? computeHotness(contactTime)
+      : "silver";
+
+    let serverIsRepurchase = false;
+    const buyerEmail = (body.email ?? "").trim().toLowerCase();
+    const dedupKey = (body.dedupKey ?? "").trim();
+    if (buyerEmail && dedupKey && supabaseReady()) {
+      const r = await hasAlreadyPurchased({ email: buyerEmail, dedupKey });
+      if (r.ok && r.alreadyPurchased) {
+        serverIsRepurchase = true;
+      }
+    }
+
+    const { price, label } = resolvePrice(serverHotness, serverIsRepurchase);
     lineItem = {
       price_data: {
         currency: "jpy",
         product_data: {
-          name: `リード購入: ${name}`,
+          name: `リード購入（${label}）: ${name}`,
           description: "代表者・決裁者に到達した法人の詳細情報",
         },
-        unit_amount: LEAD_PRICE_JPY,
+        unit_amount: price,
       },
       quantity: 1,
     };
@@ -84,6 +132,9 @@ export async function POST(req: Request) {
     metadata = {
       lead_id: body.leadId,
       lead_name: name,
+      lead_hotness: serverHotness,
+      lead_dedup_key: dedupKey.slice(0, 500),
+      lead_is_repurchase: serverIsRepurchase ? "1" : "0",
       ...snapshotToMetadata(body.leadSnapshot),
     };
   } else if (body.planId) {
@@ -124,18 +175,27 @@ export async function POST(req: Request) {
   }
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    payment_method_types: ["card"],
-    line_items: [lineItem],
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    locale: "ja",
-    customer_creation: "if_required",
-    billing_address_collection: "auto",
-    allow_promotion_codes: true,
-    metadata,
-  });
-
-  return NextResponse.json({ url: session.url });
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [lineItem],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      locale: "ja",
+      customer_creation: "if_required",
+      billing_address_collection: "auto",
+      allow_promotion_codes: true,
+      metadata,
+    });
+    return NextResponse.json({ url: session.url });
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error:
+          "決済画面の準備に失敗しました。時間をおいて再度お試しください。",
+      },
+      { status: 502 },
+    );
+  }
 }

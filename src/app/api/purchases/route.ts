@@ -6,6 +6,8 @@
 import { NextResponse } from "next/server";
 import {
   listPurchasesByEmail,
+  deletePurchase,
+  deleteAllPurchasesByEmail,
   supabaseReady,
 } from "@/lib/purchases-server";
 
@@ -37,5 +39,37 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     purchases: result.purchases,
+  });
+}
+
+// 個別 or 一括の購入解除
+// DELETE /api/purchases?email=X&lead_id=Y    → 1件削除
+// DELETE /api/purchases?email=X              → そのメアドの全件削除
+export async function DELETE(req: Request) {
+  const url = new URL(req.url);
+  const email = (url.searchParams.get("email") ?? "").trim().toLowerCase();
+  const leadId = url.searchParams.get("lead_id") ?? "";
+  if (!email) {
+    return NextResponse.json({ error: "email required" }, { status: 400 });
+  }
+  if (!supabaseReady()) {
+    return NextResponse.json(
+      { ok: true, persisted: false, reason: "supabase_not_configured" },
+      { status: 200 },
+    );
+  }
+  const result = leadId
+    ? await deletePurchase({ email, leadId })
+    : await deleteAllPurchasesByEmail(email);
+  if (!result.ok) {
+    return NextResponse.json(
+      { ok: false, reason: result.reason },
+      { status: 500 },
+    );
+  }
+  return NextResponse.json({
+    ok: true,
+    persisted: true,
+    deleted: result.deleted,
   });
 }

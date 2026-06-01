@@ -90,18 +90,31 @@ export function PickerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[3000] bg-white flex flex-col">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="picker-title"
+      className="fixed inset-0 z-[3000] bg-black/40 flex items-end justify-center"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white w-full max-h-[90dvh] rounded-t-2xl shadow-xl flex flex-col">
+        {/* スワイプダウン用ハンドル */}
+        <div className="shrink-0 flex justify-center pt-2">
+          <div className="w-10 h-1.5 rounded-full bg-slate-300" />
+        </div>
       {/* ヘッダー */}
       <header className="shrink-0 sticky top-0 bg-white border-b border-slate-200">
         <div className="h-14 px-2 flex items-center gap-1">
           <button
             onClick={onClose}
-            className="h-11 w-11 inline-flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-700"
+            className="h-11 w-11 inline-flex items-center justify-center rounded-full hover:bg-slate-100 active:bg-slate-200 text-slate-700"
             aria-label="閉じる"
           >
             <ArrowLeft size={20} />
           </button>
-          <h2 className="font-bold text-slate-900">{meta.title}</h2>
+          <h2 id="picker-title" className="font-bold text-slate-900">{meta.title}</h2>
           <div className="ml-auto flex items-center gap-1 pr-2">
             {draft.size > 0 && (
               <button
@@ -187,11 +200,12 @@ export function PickerModal({
       <footer className="shrink-0 border-t border-slate-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <button
           onClick={apply}
-          className="w-full h-12 bg-slate-900 text-white font-bold tracking-wide active:bg-slate-800"
+          className="w-full h-12 rounded-lg bg-slate-900 text-white font-bold tracking-wide active:bg-slate-800 active:scale-[0.99] transition-transform"
         >
           この条件で絞り込む
         </button>
       </footer>
+      </div>
     </div>
   );
 }

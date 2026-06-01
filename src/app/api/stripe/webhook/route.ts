@@ -62,6 +62,7 @@ export async function POST(req: Request) {
         const result = await upsertPurchase({
           email,
           leadId: metadata.lead_id,
+          dedupKey: metadata.lead_dedup_key || undefined,
           snapshot: metaToSnapshot(metadata),
           stripeSessionId: session.id,
           stripePaymentIntent:
@@ -72,7 +73,12 @@ export async function POST(req: Request) {
           currency: session.currency ?? "jpy",
         });
         if (!result.ok) {
+          // 500 を返すことで Stripe に Webhook を再送させる
           console.error("[stripe webhook] upsert failed:", result.reason);
+          return NextResponse.json(
+            { error: "persist_failed", reason: result.reason },
+            { status: 500 },
+          );
         }
       }
     }

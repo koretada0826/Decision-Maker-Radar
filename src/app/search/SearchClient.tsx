@@ -4,12 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import { MapPin, Tag, X } from "lucide-react";
 import { LeadCard } from "./LeadCard";
 import { PickerModal, type PickerOption } from "./PickerModal";
+import { EmailRestoreDialog } from "./EmailRestoreDialog";
 import {
   getPurchasedIds,
   setPurchasedIds,
   getStoredEmail,
   setStoredEmail,
+  getPurchasedDedupKeys,
+  addPurchasedDedupKey,
 } from "@/lib/purchases";
+import { computeHotness } from "@/lib/hotness";
+import { makeDedupKey } from "@/lib/utils";
 import type { Lead } from "@/lib/types";
 
 const STORAGE_KEY = "kr-uploaded-leads-v2";
@@ -18,19 +23,47 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
   const [uploaded, setUploaded] = useState<Lead[]>([]);
   const [areas, setAreas] = useState<Set<string>>(new Set());
   const [industries, setIndustries] = useState<Set<string>>(new Set());
-  const [highOnly, setHighOnly] = useState(false);
+  const [rankFilter, setRankFilter] = useState({
+    platinum: false,
+    emerald: false,
+    silver: false,
+    repurchase: false,
+  });
   const [purchasedOnly, setPurchasedOnly] = useState(false);
   const [picker, setPicker] = useState<"area" | "industry" | null>(null);
   const [purchasedIds, setLocalPurchasedIds] = useState<Set<string>>(new Set());
+  const [purchasedKeys, setPurchasedKeys] = useState<Set<string>>(new Set());
+  // 60秒ごとに再評価 → 並び順・フィルター・全LeadCardのランクが時間経過で更新される
+  // 全体で1本のタイマーに集約（数百カード分の setInterval 並走を回避）
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // /admin から戻ってきた時、/success から戻ってきた時に再読込
   useEffect(() => {
     function refresh() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        setUploaded(raw ? (JSON.parse(raw) as Lead[]) : []);
+        const parsed = raw ? JSON.parse(raw) : null;
+        setUploaded(Array.isArray(parsed) ? (parsed as Lead[]) : []);
       } catch {}
-      setLocalPurchasedIds(new Set(getPurchasedIds()));
+      const ids = getPurchasedIds();
+      setLocalPurchasedIds(new Set(ids));
+      setPurchasedKeys(new Set(getPurchasedDedupKeys()));
+      // 旧バージョンの localStorage に dedup_key 履歴がない場合、現在の uploaded から推定して埋める
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        const list: Lead[] = Array.isArray(parsed) ? parsed : [];
+        const idSet = new Set(ids);
+        for (const l of list) {
+          if (idSet.has(l.id) && l.dedup_key) {
+            addPurchasedDedupKey(l.dedup_key);
+          }
+        }
+      } catch {}
     }
     refresh();
     window.addEventListener("focus", refresh);
@@ -76,14 +109,24 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           const raw = localStorage.getItem(STORAGE_KEY);
           const current: Lead[] = raw ? JSON.parse(raw) : [];
           const existingIds = new Set(current.map((l) => l.id));
+          // サーバー復元時：保存メアドの全購入を「再購入として認識」するために
+          // dedup_key を再計算して localStorage の履歴に積む
+          for (const p of purchases) {
+            const k = makeDedupKey(p.company_name, p.phone);
+            if (k) addPurchasedDedupKey(k);
+          }
+          setPurchasedKeys(new Set(getPurchasedDedupKeys()));
+
           const restored: Lead[] = purchases
             .filter((p) => !existingIds.has(p.lead_id))
             .map((p) => ({
               id: p.lead_id,
+              dedup_key: makeDedupKey(p.company_name, p.phone),
               company_name: p.company_name,
               address: p.address ?? "",
               ward: p.ward ?? "",
               industry: p.industry,
+              size: null,
               phone: p.phone,
               rank: (p.rank ?? "D") as Lead["rank"],
               score: p.score ?? 0,
@@ -106,36 +149,27 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
       .catch(() => {});
   }, []);
 
-  async function restorePurchases() {
-    const email = window.prompt(
-      "購入時にStripeで入力したメールアドレスを入力してください：",
+  const [restoreOpen, setRestoreOpen] = useState(false);
+
+  async function restoreByEmail(email: string) {
+    const normalized = email.trim().toLowerCase();
+    const res = await fetch(
+      `/api/purchases?email=${encodeURIComponent(normalized)}`,
     );
-    if (!email) return;
-    try {
-      const res = await fetch(
-        `/api/purchases?email=${encodeURIComponent(email.trim())}`,
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(
+        data.reason === "supabase_not_configured"
+          ? "サーバー設定が未完了です（Supabaseが必要です）"
+          : `エラー: ${data.reason ?? "不明"}`,
       );
-      const data = await res.json();
-      if (!data.ok) {
-        alert(
-          data.reason === "supabase_not_configured"
-            ? "サーバー設定が未完了です。Supabaseが必要です。"
-            : `エラー: ${data.reason ?? "不明"}`,
-        );
-        return;
-      }
-      if (!data.purchases || data.purchases.length === 0) {
-        alert("該当する購入履歴が見つかりませんでした。");
-        return;
-      }
-      setStoredEmail(email.trim());
-      alert(
-        `${data.purchases.length} 件の購入履歴を復元しました。ページを再読み込みします。`,
-      );
-      window.location.reload();
-    } catch (e) {
-      alert(`エラー: ${(e as Error).message}`);
     }
+    if (!data.purchases || data.purchases.length === 0) {
+      throw new Error("該当する購入履歴が見つかりませんでした");
+    }
+    setStoredEmail(normalized);
+    alert(`${data.purchases.length} 件の購入履歴を復元しました。`);
+    window.location.reload();
   }
 
   const all = useMemo(() => [...uploaded, ...initial], [uploaded, initial]);
@@ -172,10 +206,38 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           : l.industry !== null && industries.has(l.industry),
       )
       .filter((l) => (areas.size === 0 ? true : areas.has(l.ward)))
-      .filter((l) => (highOnly ? l.rank === "S" || l.rank === "A" : true))
+      .filter((l) => {
+        const anyOn =
+          rankFilter.platinum ||
+          rankFilter.emerald ||
+          rankFilter.silver ||
+          rankFilter.repurchase;
+        if (!anyOn) return true;
+        const h = computeHotness(l.contact_time, now);
+        const isRep =
+          !purchasedIds.has(l.id) &&
+          !!l.dedup_key &&
+          purchasedKeys.has(l.dedup_key);
+        if (rankFilter.platinum && h === "platinum") return true;
+        if (rankFilter.emerald && h === "emerald") return true;
+        if (rankFilter.silver && h === "silver") return true;
+        if (rankFilter.repurchase && isRep) return true;
+        return false;
+      })
       .filter((l) => (purchasedOnly ? purchasedIds.has(l.id) : true))
-      .sort((a, b) => b.score - a.score);
-  }, [all, industries, areas, highOnly, purchasedOnly, purchasedIds]);
+      .sort((a, b) => {
+        const rank = (l: Lead) => {
+          const h = computeHotness(l.contact_time, now);
+          return h === "platinum" ? 0 : h === "emerald" ? 1 : 2;
+        };
+        const r = rank(a) - rank(b);
+        if (r !== 0) return r;
+        return (
+          new Date(b.contact_time).getTime() -
+          new Date(a.contact_time).getTime()
+        );
+      });
+  }, [all, industries, areas, rankFilter, purchasedOnly, purchasedIds, purchasedKeys, now]);
 
   function removeArea(v: string) {
     setAreas((s) => {
@@ -199,8 +261,8 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
         <div className="px-4 h-14 flex items-center gap-2">
           <div className="font-bold tracking-wide">決裁者レーダー</div>
           <button
-            onClick={restorePurchases}
-            className="ml-auto text-white/70 text-[10px] underline hover:text-white"
+            onClick={() => setRestoreOpen(true)}
+            className="ml-auto inline-flex items-center justify-center h-9 px-3 rounded-lg bg-white/10 text-white text-xs font-semibold active:bg-white/20"
             title="別端末・キャッシュクリア後の復元"
           >
             購入を復元
@@ -256,10 +318,14 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
             ))}
             <button
               onClick={() => {
-                setAreas(new Set());
-                setIndustries(new Set());
+                if (areas.size + industries.size > 1
+                  ? confirm("選択中の絞り込み条件を全て解除しますか？")
+                  : true) {
+                  setAreas(new Set());
+                  setIndustries(new Set());
+                }
               }}
-              className="text-[11px] text-slate-500 underline self-center"
+              className="inline-flex items-center h-9 px-2.5 text-xs text-slate-600 underline self-center active:bg-slate-100 rounded"
             >
               全てクリア
             </button>
@@ -267,22 +333,13 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
         )}
 
         {/* 結果バー */}
-        <div className="mt-2 flex items-center text-xs text-slate-600 gap-3">
+        <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
           <span>
             <span className="font-semibold text-slate-900">
               {results.length}
             </span>{" "}
             件 / 全 {all.length} 件
           </span>
-          <label className="ml-auto inline-flex items-center gap-1 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={highOnly}
-              onChange={(e) => setHighOnly(e.target.checked)}
-              className="accent-brand-700"
-            />
-            <span>S/Aのみ</span>
-          </label>
           <label className="inline-flex items-center gap-1 cursor-pointer">
             <input
               type="checkbox"
@@ -292,6 +349,48 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
             />
             <span>購入済のみ</span>
           </label>
+        </div>
+
+        {/* ランクフィルター：トグルチップ式（44pxタップ領域確保） */}
+        <div className="mt-2 -mx-1 px-1 overflow-x-auto">
+          <div className="flex items-center gap-1.5 flex-nowrap">
+            <RankToggle
+              active={rankFilter.platinum}
+              onClick={() =>
+                setRankFilter((s) => ({ ...s, platinum: !s.platinum }))
+              }
+              label="プラチナ"
+              dot="bg-slate-900 ring-1 ring-amber-400"
+              activeClass="bg-slate-900 text-amber-300 border-slate-900"
+            />
+            <RankToggle
+              active={rankFilter.emerald}
+              onClick={() =>
+                setRankFilter((s) => ({ ...s, emerald: !s.emerald }))
+              }
+              label="エメラルド"
+              dot="bg-emerald-600"
+              activeClass="bg-emerald-600 text-white border-emerald-700"
+            />
+            <RankToggle
+              active={rankFilter.silver}
+              onClick={() =>
+                setRankFilter((s) => ({ ...s, silver: !s.silver }))
+              }
+              label="シルバー"
+              dot="bg-slate-400"
+              activeClass="bg-slate-300 text-slate-900 border-slate-400"
+            />
+            <RankToggle
+              active={rankFilter.repurchase}
+              onClick={() =>
+                setRankFilter((s) => ({ ...s, repurchase: !s.repurchase }))
+              }
+              label="更新版"
+              dot="bg-amber-400"
+              activeClass="bg-amber-400 text-amber-900 border-amber-500"
+            />
+          </div>
         </div>
       </div>
 
@@ -328,6 +427,12 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
               key={l.id}
               lead={l}
               purchased={purchasedIds.has(l.id)}
+              isRepurchase={
+                !purchasedIds.has(l.id) &&
+                !!l.dedup_key &&
+                purchasedKeys.has(l.dedup_key)
+              }
+              now={now}
             />
           ))
         )}
@@ -353,7 +458,45 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
         />
       )}
 
+      {restoreOpen && (
+        <EmailRestoreDialog
+          onClose={() => setRestoreOpen(false)}
+          onSubmit={async (email) => {
+            await restoreByEmail(email);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function RankToggle({
+  active,
+  onClick,
+  label,
+  dot,
+  activeClass,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  dot: string;
+  activeClass: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`shrink-0 inline-flex items-center gap-1.5 h-10 px-3 rounded-full border-2 text-xs font-bold transition-colors active:scale-[0.97] ${
+        active
+          ? activeClass
+          : "bg-white text-slate-600 border-slate-300 hover:border-slate-400"
+      }`}
+    >
+      <span className={`w-2 h-2 rounded-full ${dot}`} />
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -429,13 +572,12 @@ function Chip({
   return (
     <button
       onClick={onRemove}
-      className="inline-flex items-center gap-1 h-7 pl-2 pr-1.5 bg-slate-900 text-white text-xs font-semibold"
+      aria-label={`${category} ${value} を解除`}
+      className="inline-flex items-center gap-1.5 h-9 pl-2.5 pr-2 rounded-md bg-slate-900 text-white text-xs font-semibold active:bg-slate-800"
     >
-      <span className="text-[10px] opacity-60 uppercase tracking-wider">
-        {category}
-      </span>
+      <span className="text-[10px] opacity-60">{category}</span>
       <span>{value}</span>
-      <X size={12} />
+      <X size={14} />
     </button>
   );
 }

@@ -2,11 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ShieldAlert, Upload, Trash2, RotateCcw } from "lucide-react";
+import {
+  ArrowLeft,
+  ShieldAlert,
+  Upload,
+  Trash2,
+  RotateCcw,
+  X as XIcon,
+} from "lucide-react";
 import { CsvUploadDialog } from "@/app/search/CsvUploadDialog";
 import {
   getPurchasedIds,
   setPurchasedIds,
+  removePurchasedId,
+  getStoredEmail,
   LEAD_PRICE_JPY,
 } from "@/lib/purchases";
 import type { Lead } from "@/lib/types";
@@ -21,7 +30,8 @@ export default function AdminPage() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setUploaded(JSON.parse(raw));
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed)) setUploaded(parsed as Lead[]);
     } catch {}
     setPurchased(new Set(getPurchasedIds()));
   }, []);
@@ -33,26 +43,67 @@ export default function AdminPage() {
   const totalRevenue = purchasedLeads.length * LEAD_PRICE_JPY;
 
   function save(next: Lead[]) {
-    setUploaded(next);
+    // 同じ dedup_key は最新の1件だけ残す（同じCSV再取込時の重複行を排除）
+    const seen = new Set<string>();
+    const deduped: Lead[] = [];
+    for (const l of next) {
+      const key = l.dedup_key || l.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(l);
+    }
+    setUploaded(deduped);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {}
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(deduped));
+    } catch (e) {
+      const msg = (e as Error)?.name === "QuotaExceededError"
+        ? "ブラウザの保存容量を超えました。古い取込データを削除してください。"
+        : "保存に失敗しました。";
+      alert(msg);
+    }
   }
 
-  function resetPurchases() {
+  async function resetPurchases() {
     if (
-      confirm(
+      !confirm(
         `購入履歴 ${purchased.size} 件をリセットします。\nリストは未購入の状態に戻り、住所/電話/メモは再ロックされます。よろしいですか？`,
       )
-    ) {
-      setPurchasedIds([]);
-      setPurchased(new Set());
+    )
+      return;
+    setPurchasedIds([]);
+    setPurchased(new Set());
+    const email = getStoredEmail();
+    if (email) {
+      try {
+        await fetch(`/api/purchases?email=${encodeURIComponent(email)}`, {
+          method: "DELETE",
+        });
+      } catch {}
+    }
+  }
+
+  async function removeSinglePurchase(lead: Lead) {
+    if (!confirm(`「${lead.company_name}」を未購入に戻しますか？`)) return;
+    removePurchasedId(lead.id);
+    setPurchased((s) => {
+      const next = new Set(s);
+      next.delete(lead.id);
+      return next;
+    });
+    const email = getStoredEmail();
+    if (email) {
+      try {
+        await fetch(
+          `/api/purchases?email=${encodeURIComponent(email)}&lead_id=${encodeURIComponent(lead.id)}`,
+          { method: "DELETE" },
+        );
+      } catch {}
     }
   }
 
   return (
     <div className="min-h-screen pb-12">
-      <header className="sticky top-0 z-30 bg-brand-700 text-white shadow">
+      <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800">
         <div className="px-2 h-14 flex items-center gap-1">
           <Link
             href="/search"
@@ -74,7 +125,7 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <section className="rounded-2xl border border-slate-200 bg-white">
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="p-4 border-b border-slate-100">
             <h2 className="font-bold text-slate-900">CSVインポート</h2>
             <p className="text-xs text-slate-500 mt-1">
@@ -84,22 +135,23 @@ export default function AdminPage() {
           <div className="p-4 flex items-center gap-3">
             <button
               onClick={() => setOpen(true)}
-              className="inline-flex items-center gap-2 h-11 px-4 rounded-xl bg-brand-700 text-white font-semibold active:bg-brand-600"
+              className="inline-flex items-center gap-2 h-11 px-4 rounded-lg bg-slate-900 text-white font-bold active:bg-slate-800 active:scale-[0.98] transition-transform"
             >
               <Upload size={16} />
               CSVを取り込む
             </button>
             <a
-              href="/sample_import.csv"
+              href="/api/sample-csv"
               download
               className="text-sm text-brand-700 underline"
+              title="アクセスした時刻基準でプラチナ/エメラルド/シルバーが揃うサンプル"
             >
-              サンプルをDL
+              動作確認用サンプルをDL（毎回新鮮）
             </a>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white">
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="p-4 border-b border-slate-100 flex items-center">
             <h2 className="font-bold text-slate-900">取り込み済みデータ</h2>
             <span className="ml-2 text-xs bg-emerald-100 text-emerald-800 rounded px-2 py-0.5">
@@ -116,7 +168,7 @@ export default function AdminPage() {
                     save([]);
                   }
                 }}
-                className="ml-auto inline-flex items-center gap-1 text-sm text-red-600"
+                className="ml-auto inline-flex items-center gap-1 h-10 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100"
               >
                 <Trash2 size={14} />
                 全削除
@@ -146,7 +198,7 @@ export default function AdminPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white">
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="p-4 border-b border-slate-100 flex items-center flex-wrap gap-2">
             <h2 className="font-bold text-slate-900">購入履歴</h2>
             <span className="text-xs bg-emerald-100 text-emerald-800 rounded px-2 py-0.5">
@@ -194,6 +246,15 @@ export default function AdminPage() {
                     <div className="text-sm font-bold text-slate-900 shrink-0 tabular-nums">
                       ¥{LEAD_PRICE_JPY.toLocaleString()}
                     </div>
+                    <button
+                      onClick={() => removeSinglePurchase(l)}
+                      className="shrink-0 inline-flex items-center gap-1 h-8 px-2 rounded-lg border border-red-200 bg-white text-red-700 text-xs font-semibold hover:bg-red-50 active:bg-red-100"
+                      aria-label={`${l.company_name} を未購入に戻す`}
+                      title="このリードを未購入に戻す"
+                    >
+                      <XIcon size={12} />
+                      解除
+                    </button>
                   </li>
                 ))}
                 {purchasedLeads.length < purchased.size && (
@@ -207,7 +268,7 @@ export default function AdminPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white">
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="p-4 border-b border-slate-100">
             <h2 className="font-bold text-slate-900">運用メモ（MVP）</h2>
           </div>

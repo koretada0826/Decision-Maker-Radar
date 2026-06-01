@@ -31,7 +31,7 @@ export default function BuyPage() {
 
   return (
     <div className="min-h-screen pb-16">
-      <header className="sticky top-0 z-30 bg-brand-700 text-white shadow">
+      <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800">
         <div className="px-2 h-14 flex items-center gap-1">
           <Link
             href="/search"
@@ -61,12 +61,12 @@ export default function BuyPage() {
           {PLANS.map((p) => (
             <li
               key={p.id}
-              className={`relative rounded-2xl border-2 bg-white p-4 ${
+              className={`relative rounded-lg border-2 bg-white p-4 ${
                 p.recommended ? "border-brand-700" : "border-slate-200"
               }`}
             >
               {p.recommended && (
-                <span className="absolute -top-2 left-4 inline-block bg-brand-700 text-white text-[10px] font-bold rounded-full px-2 py-0.5">
+                <span className="absolute -top-2 left-4 inline-block bg-slate-900 text-white text-xs font-bold rounded-full px-2 py-0.5">
                   おすすめ
                 </span>
               )}
@@ -110,7 +110,7 @@ export default function BuyPage() {
                 disabled={loadingId !== null}
                 className={`mt-4 w-full h-12 rounded-xl font-bold transition-colors ${
                   p.recommended
-                    ? "bg-brand-700 text-white active:bg-brand-600"
+                    ? "bg-slate-900 text-white active:bg-slate-800"
                     : "bg-slate-900 text-white active:bg-slate-700"
                 } disabled:opacity-60`}
               >
