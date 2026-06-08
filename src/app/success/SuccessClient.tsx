@@ -30,12 +30,13 @@ export function SuccessClient({
   useEffect(() => {
     // デモモードはローカル動作確認時のみ許可。
     // 本番では Stripe API キーが設定されているはずなので、ホスト名でガード。
-    // localhost / *.vercel.app の preview のみで demo フローを許可。
+    // localhost / *.vercel.app / *.onrender.com の preview のみで demo フローを許可。
     const allowDemoHere =
       typeof window !== "undefined" &&
       (window.location.hostname === "localhost" ||
         window.location.hostname === "127.0.0.1" ||
-        window.location.hostname.endsWith(".vercel.app"));
+        window.location.hostname.endsWith(".vercel.app") ||
+        window.location.hostname.endsWith(".onrender.com"));
 
     if (isDemo && allowDemoHere && leadId) {
       addPurchasedId(leadId);
