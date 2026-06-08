@@ -54,7 +54,7 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
 
   if (!checked) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-slate-500 text-sm">
+      <div className="min-h-dvh flex items-center justify-center text-slate-500 text-sm">
         読み込み中…
       </div>
     );
@@ -62,7 +62,7 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
 
   if (!authed) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4">
+      <div className="min-h-dvh flex items-center justify-center px-4">
         <form
           onSubmit={submit}
           className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-slate-200 p-6 space-y-4"

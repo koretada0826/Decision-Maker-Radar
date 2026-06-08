@@ -18,14 +18,22 @@ export function formatDateTime(iso: string | null | undefined) {
   }).format(d);
 }
 
-export function minutesAgo(iso: string | null | undefined): number | null {
+export function minutesAgo(
+  iso: string | null | undefined,
+  now?: number,
+): number | null {
   if (!iso) return null;
-  const diff = Date.now() - new Date(iso).getTime();
+  const reference = now ?? Date.now();
+  const diff = reference - new Date(iso).getTime();
   return Math.floor(diff / 60000);
 }
 
-export function humanMinutesAgo(iso: string | null | undefined): string {
-  const m = minutesAgo(iso);
+// now を渡せば SSR/CSR で同じ値が出る（hydration mismatch 防止）
+export function humanMinutesAgo(
+  iso: string | null | undefined,
+  now?: number,
+): string {
+  const m = minutesAgo(iso, now);
   if (m == null) return "—";
   if (m < 1) return "たった今";
   if (m < 60) return `${m}分前`;

@@ -7,7 +7,7 @@ export default function LegalLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-dvh bg-white">
       <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800">
         <div className="px-2 h-14 flex items-center gap-1 max-w-3xl mx-auto">
           <Link

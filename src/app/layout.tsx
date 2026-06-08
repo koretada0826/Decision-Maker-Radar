@@ -38,8 +38,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ja">
-      <body className="min-h-screen">
+    <html lang="ja" translate="no" className="notranslate">
+      <body className="min-h-dvh">
         <ToastProvider>
           {children}
           <PwaRegister />

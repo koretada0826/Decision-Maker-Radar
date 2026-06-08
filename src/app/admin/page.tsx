@@ -49,6 +49,10 @@ function AdminPageInner() {
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [confirmResetPurchases, setConfirmResetPurchases] = useState(false);
   const [confirmRemoveOne, setConfirmRemoveOne] = useState<Lead | null>(null);
+  const [serverRevenue, setServerRevenue] = useState<{
+    count: number;
+    totalAmount: number;
+  } | null>(null);
 
   useEffect(() => {
     try {
@@ -70,15 +74,28 @@ function AdminPageInner() {
       const ts = localStorage.getItem(LAST_IMPORT_KEY);
       if (ts) setLastImport(parseInt(ts, 10) || null);
     } catch {}
+    // サーバーから実額売上を取得
+    fetch("/api/admin/revenue")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) {
+          setServerRevenue({ count: data.count, totalAmount: data.totalAmount });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const purchasedLeads = useMemo(
     () => uploaded.filter((l) => purchased.has(l.id)),
     [uploaded, purchased],
   );
-  const totalRevenue = purchasedLeads.length * LEAD_PRICE_JPY;
+  // サーバー集計があればそちらを優先（実額）、なければローカル件数 × ¥1000 でフォールバック
+  const totalRevenue = serverRevenue
+    ? serverRevenue.totalAmount
+    : purchasedLeads.length * LEAD_PRICE_JPY;
+  const revenueCount = serverRevenue ? serverRevenue.count : purchased.size;
 
-  function save(next: Lead[]) {
+  async function save(next: Lead[]) {
     // 同じ dedup_key は最新の1件だけ残す（同じCSV再取込時の重複行を排除）
     const seen = new Set<string>();
     const deduped: Lead[] = [];
@@ -99,6 +116,45 @@ function AdminPageInner() {
         ? "ブラウザの保存容量を超えました。古い取り込みデータを削除してください。"
         : "保存に失敗しました。時間をおいて再度お試しください。";
       toast.show(msg, "error");
+    }
+
+    // サーバーにも upsert（営業担当の端末から見えるように）
+    if (SUPABASE_CONFIGURED) {
+      try {
+        const res = await fetch("/api/leads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            leads: deduped.map((l) => ({
+              id: l.id,
+              dedup_key: l.dedup_key ?? null,
+              company_name: l.company_name,
+              address: l.address ?? null,
+              ward: l.ward ?? null,
+              industry: l.industry ?? null,
+              size: l.size ?? null,
+              phone: l.phone ?? null,
+              memo: l.memo ?? null,
+              rank: l.rank ?? null,
+              score: l.score ?? null,
+              contact_time: l.contact_time ?? null,
+              contact_person_type: l.contact_person_type ?? null,
+              call_result: l.call_result ?? null,
+            })),
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          toast.show(
+            `${data.upserted} 件をサーバーに保存しました（全端末で共有）`,
+            "success",
+          );
+        } else {
+          toast.show("サーバー保存に失敗しました（ローカルには保存済み）", "error");
+        }
+      } catch {
+        toast.show("サーバー保存に失敗しました（ローカルには保存済み）", "error");
+      }
     }
   }
 
@@ -136,7 +192,7 @@ function AdminPageInner() {
   }
 
   return (
-    <div className="min-h-screen pb-12">
+    <div className="min-h-dvh pb-12">
       <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800">
         <div className="px-2 h-14 flex items-center gap-1">
           <Link
@@ -160,7 +216,7 @@ function AdminPageInner() {
               データベースが未接続のため、取り込んだCSV・購入履歴は
               <strong>このブラウザの中だけ</strong>に残ります。
               <ul className="mt-1 list-disc list-inside space-y-0.5">
-                <li>他の端末（営業マンのスマホ）には共有されません</li>
+                <li>他の端末（営業担当のスマホ）には共有されません</li>
                 <li>キャッシュを消すとデータも消えます</li>
               </ul>
             </div>
@@ -190,7 +246,7 @@ function AdminPageInner() {
           <ShieldAlert size={16} className="shrink-0 mt-0.5" />
           <div>
             <strong>管理者専用ページ。</strong>
-            URL（/admin）を直接開いてアクセスします。営業マン画面には導線がありません。
+            URL（/admin）を直接開いてアクセスします。営業担当画面には導線がありません。
           </div>
         </div>
 
@@ -234,7 +290,7 @@ function AdminPageInner() {
                 className="ml-auto inline-flex items-center gap-1 h-11 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100"
               >
                 <Trash2 size={14} aria-hidden="true" />
-                全削除
+                すべて削除
               </button>
             )}
           </div>
@@ -265,11 +321,14 @@ function AdminPageInner() {
           <div className="p-4 border-b border-slate-100 flex items-center flex-wrap gap-2">
             <h2 className="font-bold text-slate-900">購入履歴</h2>
             <span className="text-xs bg-emerald-100 text-emerald-800 rounded px-2 py-0.5 tabular-nums">
-              {purchased.size} 件
+              {revenueCount} 件
             </span>
-            {purchased.size > 0 && (
+            {revenueCount > 0 && (
               <span className="text-xs text-slate-600 tabular-nums">
                 売上 ¥{totalRevenue.toLocaleString()}
+                {serverRevenue && (
+                  <span className="ml-1 text-emerald-700">（実額）</span>
+                )}
               </span>
             )}
             <button
@@ -279,13 +338,13 @@ function AdminPageInner() {
               className="ml-auto inline-flex items-center gap-1 h-11 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RotateCcw size={14} aria-hidden="true" />
-              全て未購入に戻す
+              すべて未購入に戻す
             </button>
           </div>
           <div className="p-4">
             {purchased.size === 0 ? (
               <p className="text-sm text-slate-500">
-                まだ購入されたリードはありません。営業マンが1件 ¥
+                まだ購入されたリードはありません。営業担当が1件 ¥
                 {LEAD_PRICE_JPY.toLocaleString()}〜 で詳細を解放できます。
               </p>
             ) : (
@@ -338,10 +397,10 @@ function AdminPageInner() {
           </div>
           <div className="p-4 text-xs text-slate-600 space-y-1">
             <p>
-              ・営業マンへの配布：取り込み後、共有URL（/search）をLINEで送る → タップで即閲覧。
+              ・営業担当への配布：取り込み後、共有URL（/search）をLINEで送る → タップで即閲覧。
             </p>
             <p>
-              ・CSV運用：毎日同じ時間帯に取り込むと営業マンが「いつ最新版が来るか」を覚えやすい。
+              ・CSV運用：毎日同じ時間帯に取り込むと営業担当が「いつ最新版が来るか」を覚えやすい。
             </p>
           </div>
         </section>
@@ -357,12 +416,17 @@ function AdminPageInner() {
       <ConfirmDialog
         open={confirmDeleteAll}
         title="取り込みデータをすべて削除"
-        description={`${uploaded.length} 件のCSVデータを削除します。\n営業マンのリストからも消えます。`}
+        description={`${uploaded.length} 件のCSVデータを削除します。\n営業担当のリストからも消えます。`}
         confirmLabel="削除する"
         cancelLabel="やめる"
         tone="danger"
-        onConfirm={() => {
-          save([]);
+        onConfirm={async () => {
+          await save([]);
+          if (SUPABASE_CONFIGURED) {
+            try {
+              await fetch("/api/leads", { method: "DELETE" });
+            } catch {}
+          }
           setConfirmDeleteAll(false);
           toast.show("取り込みデータをすべて削除しました", "success");
         }}

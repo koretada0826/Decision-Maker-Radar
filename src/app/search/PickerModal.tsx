@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Search as SearchIcon, X, Check } from "lucide-react";
+import { useModalBackButton } from "@/lib/use-modal-back";
 
 export type PickerOption = {
   value: string;
@@ -51,6 +52,7 @@ export function PickerModal({
     return;
   }, []);
 
+  useModalBackButton(true, onClose);
   // ESCで閉じる、bodyスクロール抑制
   useEffect(() => {
     const prev = document.body.style.overflow;

@@ -12,6 +12,7 @@ import {
   hasAlreadyPurchased,
   supabaseReady,
 } from "@/lib/purchases-server";
+import { getLeadById } from "@/lib/leads-server";
 
 function stripeConfigured() {
   const key = process.env.STRIPE_SECRET_KEY ?? "";
@@ -98,9 +99,17 @@ export async function POST(req: Request) {
     const name = body.leadName?.trim() || "リード";
 
     // === セキュリティ：価格はサーバーで再計算する ===
-    // フロント送信の hotness / isRepurchase は信用せず、
-    // contact_time から hotness を、Supabaseの履歴から isRepurchase を再判定する。
-    const contactTime = body.leadSnapshot?.contact_time;
+    // フロント送信の contact_time は信用せず、leads テーブルから真の値を引く。
+    // Supabase が未設定の場合のみフォールバックでクライアント送信値を使う（dev環境）。
+    let trueContactTime: string | null = null;
+    if (supabaseReady()) {
+      const leadResult = await getLeadById(body.leadId);
+      if (leadResult.ok && leadResult.lead) {
+        trueContactTime = leadResult.lead.contact_time;
+      }
+    }
+    const contactTime =
+      trueContactTime ?? body.leadSnapshot?.contact_time ?? null;
     const serverHotness: HotnessRank = contactTime
       ? computeHotness(contactTime)
       : "silver";
@@ -166,8 +175,17 @@ export async function POST(req: Request) {
     );
   }
 
-  // Stripe 未設定ならデモモード
+  // Stripe 未設定ならデモモード。ただし本番ビルドでは絶対に許可しない。
   if (!stripeConfigured()) {
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        {
+          error:
+            "決済システムが未設定です。サイト管理者にお問い合わせください。",
+        },
+        { status: 503 },
+      );
+    }
     const params = body.leadId
       ? `leadId=${encodeURIComponent(body.leadId)}&demo=1`
       : `plan=${body.planId}&demo=1`;
@@ -176,6 +194,7 @@ export async function POST(req: Request) {
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   try {
+    const buyerEmailForPrefill = (body.email ?? "").trim().toLowerCase();
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -186,10 +205,12 @@ export async function POST(req: Request) {
       customer_creation: "if_required",
       billing_address_collection: "auto",
       allow_promotion_codes: true,
+      // 保存済みメアドがあれば Stripe Checkout に自動入力（再入力ミス防止）
+      ...(buyerEmailForPrefill ? { customer_email: buyerEmailForPrefill } : {}),
       metadata,
     });
     return NextResponse.json({ url: session.url });
-  } catch (e) {
+  } catch {
     return NextResponse.json(
       {
         error:

@@ -14,10 +14,14 @@ body {
 }
 
 /* iOS safe-area 対応（notch / ホームバー） */
+/* iOS 15 以下では dvh 未対応のため vh フォールバック → 上書きで dvh を適用 */
 body {
+  min-height: 100vh;
   min-height: 100dvh;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
+  /* モーダルなどの内側スクロールが背景に伝播するのを防ぐ */
+  overscroll-behavior: contain;
 }
 
 /* ボタンのダブルタップズーム抑止 */

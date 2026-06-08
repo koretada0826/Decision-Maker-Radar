@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Papa from "papaparse";
 import { X, AlertTriangle, Info } from "lucide-react";
+import { useModalBackButton } from "@/lib/use-modal-back";
 import { calculateScore, isHardCut } from "@/lib/scoring";
 import {
   buildColumnMap,
@@ -136,6 +137,11 @@ export function CsvUploadDialog({
     encoding?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Android戻るボタンでモーダルを閉じる（loadingでなければ）
+  useModalBackButton(!loading, () => {
+    if (!loading) onClose();
+  });
 
   async function handleFile(file: File) {
     setLoading(true);

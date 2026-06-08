@@ -29,10 +29,12 @@ export function SuccessClient({
 
   useEffect(() => {
     // デモモードはローカル動作確認時のみ許可。
-    // 本番では Stripe API キーが設定されているはずなので、ホスト名でガード。
-    // localhost / *.vercel.app / *.onrender.com の preview のみで demo フローを許可。
+    // 本番ビルド（NODE_ENV=production）では完全に遮断する。
+    // どのホスト（localhost / *.vercel.app / *.onrender.com）であっても、
+    // NODE_ENV が production の場合は demo URL を踏んでも一切何も起きない。
     const allowDemoHere =
       typeof window !== "undefined" &&
+      process.env.NODE_ENV !== "production" &&
       (window.location.hostname === "localhost" ||
         window.location.hostname === "127.0.0.1" ||
         window.location.hostname.endsWith(".vercel.app") ||
@@ -84,7 +86,7 @@ export function SuccessClient({
   const isSingleLead = !!leadId;
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="min-h-dvh flex items-center justify-center p-4">
       <div className="max-w-md w-full text-center">
         <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 mb-4">
           <CheckCircle2 size={48} />
@@ -130,25 +132,15 @@ export function SuccessClient({
           </div>
         )}
 
-        {isDemo && (
+        {isDemo && process.env.NODE_ENV !== "production" && (
           <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900 flex gap-2 text-left">
-            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
             <div>
-              <strong>デモモードでの表示です。</strong>
+              <strong>動作確認モードでの表示です。</strong>
               <br />
-              実際の決済は行われていません。本番では Stripe APIキー{" "}
-              <code className="bg-amber-100 rounded px-1 mx-0.5">
-                STRIPE_SECRET_KEY
-              </code>{" "}
-              を設定してください。
+              実際の決済は行われていません。
             </div>
           </div>
-        )}
-
-        {sessionId && (
-          <p className="mt-2 text-[10px] text-slate-400">
-            session_id: {sessionId}
-          </p>
         )}
 
         <Link

@@ -6,6 +6,12 @@ export const runtime = "nodejs";
 // Webhookは raw body が必要なので Edge ではなく Node ランタイム
 export const dynamic = "force-dynamic";
 
+function safeParseInt(v: string | undefined): number | null {
+  if (!v) return null;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 function metaToSnapshot(metadata: Record<string, string>) {
   return {
     company_name: metadata.lead_company_name ?? metadata.lead_name ?? "",
@@ -15,7 +21,7 @@ function metaToSnapshot(metadata: Record<string, string>) {
     phone: metadata.lead_phone || null,
     memo: metadata.lead_memo || null,
     rank: metadata.lead_rank || null,
-    score: metadata.lead_score ? parseInt(metadata.lead_score, 10) : null,
+    score: safeParseInt(metadata.lead_score),
     contact_time: metadata.lead_contact_time || null,
     contact_person_type: metadata.lead_contact_person_type || null,
     call_result: metadata.lead_call_result || null,
@@ -45,8 +51,10 @@ export async function POST(req: Request) {
   try {
     event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (e) {
+    // 内部エラー詳細はサーバーログにのみ出し、クライアントには generic を返す
+    console.error("[stripe webhook] signature verification failed:", (e as Error).message);
     return NextResponse.json(
-      { error: `signature verification failed: ${(e as Error).message}` },
+      { error: "signature verification failed" },
       { status: 400 },
     );
   }
@@ -73,10 +81,10 @@ export async function POST(req: Request) {
           currency: session.currency ?? "jpy",
         });
         if (!result.ok) {
-          // 500 を返すことで Stripe に Webhook を再送させる
+          // Stripe に Webhook を再送させる（DB 一時障害の自動回復）
           console.error("[stripe webhook] upsert failed:", result.reason);
           return NextResponse.json(
-            { error: "persist_failed", reason: result.reason },
+            { error: "persist_failed" },
             { status: 500 },
           );
         }

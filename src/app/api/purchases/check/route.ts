@@ -3,9 +3,18 @@
 
 import { NextResponse } from "next/server";
 import { hasAlreadyPurchased, supabaseReady } from "@/lib/purchases-server";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function ipOf(req: Request): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -20,8 +29,16 @@ export async function GET(req: Request) {
     });
   }
 
+  // レート制限：1IP * 1メアドで 1分間30回まで
+  const rl = checkRateLimit(`purchases:check:${ipOf(req)}:${email}`, 30);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, reason: "rate_limited", alreadyPurchased: false },
+      { status: 429 },
+    );
+  }
+
   if (!supabaseReady()) {
-    // Supabase未設定なら重複チェック不可能なので通す
     return NextResponse.json({
       ok: true,
       alreadyPurchased: false,
@@ -31,14 +48,16 @@ export async function GET(req: Request) {
 
   const result = await hasAlreadyPurchased({ email, dedupKey });
   if (!result.ok) {
+    console.error("[/api/purchases/check] error:", result.reason);
     return NextResponse.json(
-      { ok: false, reason: result.reason },
+      { ok: false, reason: "server_error" },
       { status: 500 },
     );
   }
   return NextResponse.json({
     ok: true,
     alreadyPurchased: result.alreadyPurchased,
-    previousPurchase: "previousPurchase" in result ? result.previousPurchase : null,
+    previousPurchase:
+      "previousPurchase" in result ? result.previousPurchase : null,
   });
 }

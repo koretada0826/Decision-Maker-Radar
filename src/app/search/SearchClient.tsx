@@ -14,6 +14,7 @@ import {
   setStoredEmail,
   getPurchasedDedupKeys,
   addPurchasedDedupKey,
+  normalizeEmail,
 } from "@/lib/purchases";
 import { computeHotness } from "@/lib/hotness";
 import { makeDedupKey } from "@/lib/utils";
@@ -187,10 +188,25 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
   const [restoreOpen, setRestoreOpen] = useState(false);
 
   async function restoreByEmail(email: string) {
-    const normalized = email.trim().toLowerCase();
-    const res = await fetch(
-      `/api/purchases?email=${encodeURIComponent(normalized)}`,
-    );
+    // 全角・スペース・大文字を正規化（CSV取り込みCSV取り込みでも同じ正規化を使う）
+    const normalized = normalizeEmail(email);
+    // 12秒でタイムアウトする AbortController
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 12_000);
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/purchases?email=${encodeURIComponent(normalized)}`,
+        { signal: controller.signal },
+      );
+    } catch (e) {
+      clearTimeout(t);
+      if ((e as Error).name === "AbortError") {
+        throw new Error("通信がタイムアウトしました。電波の良い場所で再度お試しください。");
+      }
+      throw new Error("通信エラーが発生しました。電波の良い場所で再度お試しください。");
+    }
+    clearTimeout(t);
     const data = await res.json();
     if (!data.ok) {
       throw new Error(
@@ -294,7 +310,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
   }
 
   return (
-    <div className="min-h-screen pb-16">
+    <div className="min-h-dvh pb-16">
       {/* ヘッダー */}
       <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800">
         <div className="px-4 h-14 flex items-center gap-2">
@@ -307,8 +323,8 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
             購入を復元
           </button>
           <span className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-white/10 text-white text-[11px] tabular-nums">
-            <span className="text-white/80 text-[11px]">保有</span>
-            {purchasedIds.size} / {all.length}
+            <span className="text-white/80 text-[11px]">マイリスト</span>
+            {purchasedIds.size}
           </span>
         </div>
       </header>
@@ -398,7 +414,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
                 onChange={(e) => setPurchasedOnly(e.target.checked)}
                 className="accent-slate-900 w-4 h-4"
               />
-              <span>購入済のみ</span>
+              <span>購入済みのみ</span>
             </label>
           </div>
         </div>

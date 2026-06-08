@@ -3,7 +3,7 @@ import { LoginForm } from "./LoginForm";
 
 export default function LoginPage() {
   return (
-    <main className="min-h-screen flex items-center justify-center px-4 py-8">
+    <main className="min-h-dvh flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="text-3xl font-bold text-brand-700">決裁者レーダー</div>

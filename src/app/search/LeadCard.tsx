@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   MapPin,
   Copy,
@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { isInAppBrowser, detectedInAppName } from "@/lib/browser-detect";
 import { personLabel } from "@/lib/labels";
 import {
   humanMinutesAgo,
@@ -38,7 +39,7 @@ import {
 } from "@/lib/purchases";
 import type { Lead } from "@/lib/types";
 
-export function LeadCard({
+function LeadCardImpl({
   lead,
   purchased,
   isRepurchase,
@@ -100,6 +101,15 @@ export function LeadCard({
       return;
     }
 
+    // LINE/Facebook の内蔵ブラウザでは Stripe 3DS が動かない可能性が高い
+    if (isInAppBrowser()) {
+      const name = detectedInAppName() ?? "アプリ内ブラウザ";
+      setError(
+        `${name} の内蔵ブラウザでは決済できないことがあります。右上のメニューから「外部のブラウザで開く」を選んでください。`,
+      );
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
@@ -127,36 +137,51 @@ export function LeadCard({
         }
       }
 
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          leadId: lead.id,
-          leadName: lead.company_name,
-          // hotness と isRepurchase はサーバー側で再判定するためヒントとしてのみ送信
-          hotness,
-          isRepurchase,
-          dedupKey: lead.dedup_key,
-          email: getStoredEmail() ?? undefined,
-          leadSnapshot: {
-            company_name: lead.company_name,
-            address: lead.address,
-            ward: lead.ward,
-            industry: lead.industry,
-            size: lead.size,
-            phone: lead.phone,
-            memo: lead.memo,
-            rank: lead.rank,
-            score: lead.score,
-            contact_time: lead.contact_time,
-            contact_person_type: lead.contact_person_type,
-            call_result: lead.call_result,
-          },
-        }),
-      });
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 15_000);
+      let res: Response;
+      try {
+        res = await fetch("/api/stripe/checkout", {
+          signal: controller.signal,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            leadId: lead.id,
+            leadName: lead.company_name,
+            // hotness と isRepurchase はサーバー側で再判定するためヒントとしてのみ送信
+            hotness,
+            isRepurchase,
+            dedupKey: lead.dedup_key,
+            email: getStoredEmail() ?? undefined,
+            leadSnapshot: {
+              company_name: lead.company_name,
+              address: lead.address,
+              ward: lead.ward,
+              industry: lead.industry,
+              size: lead.size,
+              phone: lead.phone,
+              memo: lead.memo,
+              rank: lead.rank,
+              score: lead.score,
+              contact_time: lead.contact_time,
+              contact_person_type: lead.contact_person_type,
+              call_result: lead.call_result,
+            },
+          }),
+        });
+      } catch (e) {
+        clearTimeout(t);
+        if ((e as Error).name === "AbortError") {
+          throw new Error("通信がタイムアウトしました。電波の良い場所で再度お試しください。");
+        }
+        throw new Error("通信エラーが発生しました。電波の良い場所で再度お試しください。");
+      }
+      clearTimeout(t);
       const json = await res.json();
       if (!res.ok || !json.url) {
-        throw new Error(json.error ?? "決済セッション作成に失敗しました");
+        throw new Error(
+          json.error ?? "決済画面の準備に失敗しました。時間をおいて再度お試しください。",
+        );
       }
       window.location.href = json.url;
     } catch (e) {
@@ -194,7 +219,7 @@ export function LeadCard({
           {purchased && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[11px] font-bold">
               <BadgeCheck size={14} aria-hidden="true" />
-              購入済み
+              マイリスト
             </span>
           )}
           {!purchased && !isRepurchase && (
@@ -204,7 +229,7 @@ export function LeadCard({
             </span>
           )}
           <span className="ml-auto text-[11px] text-slate-500 tabular-nums">
-            {humanMinutesAgo(lead.contact_time)}
+            {humanMinutesAgo(lead.contact_time, now)}
           </span>
         </div>
 
@@ -303,10 +328,10 @@ export function LeadCard({
                   <span className="line-through opacity-70 text-sm">
                     ¥{repurchaseOriginal.toLocaleString()}
                   </span>
-                  <span>¥{REPURCHASE_PRICE.toLocaleString()} で購入</span>
+                  <span>¥{REPURCHASE_PRICE.toLocaleString()} で詳細を解放</span>
                 </span>
               ) : (
-                `${finalPrice.toLocaleString()}円でリスト購入`
+                `¥${finalPrice.toLocaleString()} で詳細を解放`
               )}
             </button>
             {error && (
@@ -348,3 +373,6 @@ export function LeadCard({
     </Card>
   );
 }
+
+// React.memo で props 浅比較。`now` が同値（同じ60秒tick内）なら再レンダーをスキップ。
+export const LeadCard = memo(LeadCardImpl);

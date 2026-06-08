@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useModalBackButton } from "@/lib/use-modal-back";
 
 type Tone = "danger" | "default";
 
@@ -24,6 +25,7 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  useModalBackButton(open, onCancel);
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;

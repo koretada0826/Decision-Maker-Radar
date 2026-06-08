@@ -151,3 +151,19 @@ export async function listPurchasesByEmail(email: string) {
   if (error) return { ok: false as const, reason: error.message };
   return { ok: true as const, purchases: (data ?? []) as PurchaseRow[] };
 }
+
+// 管理者用：全件の集計（金額合計・件数）
+export async function getRevenueSummary() {
+  if (!supabaseReady()) {
+    return { ok: false as const, reason: "supabase_not_configured" };
+  }
+  const supabase = createSupabaseServiceRole();
+  const { data, error } = await supabase
+    .from("purchases")
+    .select("amount, status")
+    .eq("status", "completed");
+  if (error) return { ok: false as const, reason: error.message };
+  const rows = data ?? [];
+  const total = rows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
+  return { ok: true as const, count: rows.length, totalAmount: total };
+}

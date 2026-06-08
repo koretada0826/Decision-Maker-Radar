@@ -18,7 +18,7 @@ export function getStoredEmail(): string | null {
   }
 }
 
-function normalizeEmail(s: string): string {
+export function normalizeEmail(s: string): string {
   // 全角英数・空白を半角化、trim、lowercase
   return s
     .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>

@@ -30,7 +30,7 @@ export default function BuyPage() {
   }
 
   return (
-    <div className="min-h-screen pb-16">
+    <div className="min-h-dvh pb-16">
       <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800">
         <div className="px-2 h-14 flex items-center gap-1">
           <Link
