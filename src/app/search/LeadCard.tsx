@@ -77,6 +77,7 @@ export function LeadCard({
   }
 
   async function purchase() {
+    if (loading) return; // 連打/ダブルクリック防止
     setLoading(true);
     setError(null);
     try {
@@ -171,7 +172,7 @@ export function LeadCard({
           {isRepurchase && !purchased && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-400 text-amber-900 text-[11px] font-bold animate-pulse">
               <Sparkles size={12} />
-              更新版 半額
+              半額 ¥500
             </span>
           )}
           {purchased && (
@@ -280,10 +281,13 @@ export function LeadCard({
                 "準備中..."
               ) : isRepurchase ? (
                 <span className="inline-flex items-center gap-2">
-                  <span className="line-through opacity-70 text-sm">
+                  <span className="text-[10px] bg-amber-900/20 px-1.5 py-0.5 rounded font-bold">
+                    半額
+                  </span>
+                  <span className="line-through opacity-60 text-sm">
                     ¥{repurchaseOriginal.toLocaleString()}
                   </span>
-                  <span>¥{REPURCHASE_PRICE.toLocaleString()} で購入（半額）</span>
+                  <span>¥{REPURCHASE_PRICE.toLocaleString()} で購入</span>
                 </span>
               ) : (
                 `${finalPrice.toLocaleString()}円でリスト購入`

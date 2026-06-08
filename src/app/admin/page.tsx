@@ -117,11 +117,28 @@ export default function AdminPage() {
       </header>
 
       <main className="px-3 py-4 space-y-3 max-w-3xl mx-auto">
-        <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900 flex gap-2">
+        <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900 flex gap-2">
+          <ShieldAlert size={16} className="shrink-0 mt-0.5 text-red-700" />
+          <div>
+            <strong>⚠️ データが端末ローカルにしか保存されません</strong>
+            <br />
+            Supabase 未設定のため、取り込んだCSV・購入履歴は{" "}
+            <strong>このブラウザ内のみ</strong>に保存されます。
+            <ul className="mt-1 list-disc list-inside space-y-0.5">
+              <li>他の端末（営業マンのスマホ）には共有されません</li>
+              <li>キャッシュクリアで全消失します</li>
+              <li>
+                本番運用前に <code className="bg-red-100 px-1 rounded">.env.local</code> に Supabase 設定が必須です
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 flex gap-2">
           <ShieldAlert size={16} className="shrink-0 mt-0.5" />
           <div>
             <strong>管理者専用ページ。</strong>
-            営業マン画面（/search）にはこのページへのリンクは出ません。本番運用時はログインを必須化し、URLを知っていてもアクセスできない設計にします。
+            営業マン画面（/search）右上の歯車アイコンからもアクセスできます。本番運用時はログインを必須化します。
           </div>
         </div>
 

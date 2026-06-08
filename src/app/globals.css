@@ -13,6 +13,34 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* iOS safe-area 対応（notch / ホームバー） */
+body {
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ボタンのダブルタップズーム抑止 */
+button,
+a {
+  touch-action: manipulation;
+}
+
+/* キーボード操作時のフォーカス可視化 */
+*:focus-visible {
+  outline: 2px solid #fbbf24;
+  outline-offset: 2px;
+}
+
+/* 横スクロールチップに iOS 慣性 + snap */
+.snap-x-chips {
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+}
+.snap-x-chips > * {
+  scroll-snap-align: start;
+}
+
 * {
   -webkit-font-smoothing: antialiased;
 }

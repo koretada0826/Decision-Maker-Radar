@@ -349,3 +349,11 @@ export function parseFlexibleDate(s: string): Date | null {
   }
   return null;
 }
+
+// 妥当な日付範囲かチェック（10年前〜1日後）
+export function isReasonableContactDate(d: Date): boolean {
+  const now = Date.now();
+  const tenYearsAgo = now - 10 * 365 * 24 * 60 * 60 * 1000;
+  const oneDayLater = now + 24 * 60 * 60 * 1000;
+  return d.getTime() >= tenYearsAgo && d.getTime() <= oneDayLater;
+}

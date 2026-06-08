@@ -13,6 +13,7 @@ import {
   decodeBuffer,
   getAddress2,
   findSizeColumn,
+  isReasonableContactDate,
   type ColumnMap,
 } from "@/lib/csv-mapping";
 import { makeDedupKey } from "@/lib/utils";
@@ -183,7 +184,7 @@ export function CsvUploadDialog({
         const hasTimeCol = !!colMap.contact_time;
         if (!hasTimeCol) {
           notes.push(
-            "接触日時の列が見つからないため、本日日時として登録します。",
+            "接触日時の列が見つからないため、全件「シルバー」（¥200）扱いで登録します。鮮度判定が不可能なため、安全側に倒します。",
           );
         }
 
@@ -212,8 +213,11 @@ export function CsvUploadDialog({
           let d: Date | null = null;
           if (hasTimeCol) {
             d = parseFlexibleDate(getCell(r, colMap, "contact_time"));
+            // 異常な日付（未来100日先や30年前等）は無効化
+            if (d && !isReasonableContactDate(d)) d = null;
           }
-          if (!d) d = new Date();
+          // 日時列なし or パース失敗 or 範囲外 → 4時間前にしてシルバー扱い
+          if (!d) d = new Date(Date.now() - 4 * 60 * 60 * 1000);
 
           // 接触相手：列が無い場合は decision_maker 扱い
           let person: ContactPersonType;
@@ -272,9 +276,14 @@ export function CsvUploadDialog({
 
           const phoneVal = getCell(r, colMap, "phone") || null;
           const sizeVal = sizeCol ? (r[sizeCol] ?? "").toString().trim() || null : null;
+          const dedupKey = makeDedupKey(companyName, phoneVal);
+          // id は dedup_key 基準で安定化（CSV再取込で同じ会社が別IDに化けるのを防ぐ）
+          const stableId = dedupKey
+            ? `lead-${dedupKey.replace(/[^a-z0-9|]/g, "").slice(0, 80)}`
+            : `csv-${Date.now()}-${i}`;
           leads.push({
-            id: `csv-${Date.now()}-${i}`,
-            dedup_key: makeDedupKey(companyName, phoneVal),
+            id: stableId,
+            dedup_key: dedupKey,
             company_name: companyName,
             address,
             ward,

@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MapPin, Tag, X } from "lucide-react";
+import Link from "next/link";
+import { Settings } from "lucide-react";
 import { LeadCard } from "./LeadCard";
 import { PickerModal, type PickerOption } from "./PickerModal";
 import { EmailRestoreDialog } from "./EmailRestoreDialog";
@@ -27,8 +29,8 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
     platinum: false,
     emerald: false,
     silver: false,
-    repurchase: false,
   });
+  const [halfPriceOnly, setHalfPriceOnly] = useState(false);
   const [purchasedOnly, setPurchasedOnly] = useState(false);
   const [picker, setPicker] = useState<"area" | "industry" | null>(null);
   const [purchasedIds, setLocalPurchasedIds] = useState<Set<string>>(new Set());
@@ -47,7 +49,19 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : null;
-        setUploaded(Array.isArray(parsed) ? (parsed as Lead[]) : []);
+        if (Array.isArray(parsed)) {
+          // 要素の型ガード：必須フィールドを持つオブジェクトだけ残す
+          const valid = parsed.filter(
+            (x): x is Lead =>
+              x != null &&
+              typeof x === "object" &&
+              typeof x.id === "string" &&
+              typeof x.company_name === "string",
+          );
+          setUploaded(valid);
+        } else {
+          setUploaded([]);
+        }
       } catch {}
       const ids = getPurchasedIds();
       setLocalPurchasedIds(new Set(ids));
@@ -99,10 +113,13 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           call_result: string | null;
         };
         const purchases = data.purchases as P[];
+        // サーバーが空の場合は localStorage の購入履歴を上書きしない（早期 return）
+        if (purchases.length === 0) return;
         const serverIds = new Set(purchases.map((p) => p.lead_id));
-        // localStorage に保存
-        setPurchasedIds(Array.from(serverIds));
-        setLocalPurchasedIds(serverIds);
+        // localStorage と merge（ローカル分も保持）
+        const merged = new Set([...getPurchasedIds(), ...serverIds]);
+        setPurchasedIds(Array.from(merged));
+        setLocalPurchasedIds(merged);
         // 元データが localStorage に無いリードは「購入したけど取り込み済み未登録」状態
         // → サーバーのスナップショットから復元してリストに表示する
         try {
@@ -207,22 +224,24 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
       )
       .filter((l) => (areas.size === 0 ? true : areas.has(l.ward)))
       .filter((l) => {
-        const anyOn =
-          rankFilter.platinum ||
-          rankFilter.emerald ||
-          rankFilter.silver ||
-          rankFilter.repurchase;
-        if (!anyOn) return true;
+        // ランクフィルター（OR）：何もチェックなしなら全部通す
+        const anyRank =
+          rankFilter.platinum || rankFilter.emerald || rankFilter.silver;
+        if (!anyRank) return true;
         const h = computeHotness(l.contact_time, now);
-        const isRep =
-          !purchasedIds.has(l.id) &&
-          !!l.dedup_key &&
-          purchasedKeys.has(l.dedup_key);
         if (rankFilter.platinum && h === "platinum") return true;
         if (rankFilter.emerald && h === "emerald") return true;
         if (rankFilter.silver && h === "silver") return true;
-        if (rankFilter.repurchase && isRep) return true;
         return false;
+      })
+      .filter((l) => {
+        // 半額対象のみ（AND）
+        if (!halfPriceOnly) return true;
+        const isHalf =
+          !purchasedIds.has(l.id) &&
+          !!l.dedup_key &&
+          purchasedKeys.has(l.dedup_key);
+        return isHalf;
       })
       .filter((l) => (purchasedOnly ? purchasedIds.has(l.id) : true))
       .sort((a, b) => {
@@ -237,7 +256,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           new Date(a.contact_time).getTime()
         );
       });
-  }, [all, industries, areas, rankFilter, purchasedOnly, purchasedIds, purchasedKeys, now]);
+  }, [all, industries, areas, rankFilter, halfPriceOnly, purchasedOnly, purchasedIds, purchasedKeys, now]);
 
   function removeArea(v: string) {
     setAreas((s) => {
@@ -262,11 +281,19 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           <div className="font-bold tracking-wide">決裁者レーダー</div>
           <button
             onClick={() => setRestoreOpen(true)}
-            className="ml-auto inline-flex items-center justify-center h-9 px-3 rounded-lg bg-white/10 text-white text-xs font-semibold active:bg-white/20"
+            className="ml-auto inline-flex items-center justify-center h-11 px-3 rounded-lg bg-white/10 text-white text-xs font-semibold active:bg-white/20"
             title="別端末・キャッシュクリア後の復元"
           >
             購入を復元
           </button>
+          <Link
+            href="/admin"
+            className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-white/10 text-white active:bg-white/20"
+            aria-label="管理者ページ"
+            title="管理者ページ（CSV取込）"
+          >
+            <Settings size={16} />
+          </Link>
           <span className="inline-flex items-center gap-1.5 h-7 px-2 bg-white/10 text-white text-[11px] tabular-nums">
             <span className="text-white/60 uppercase tracking-wider text-[10px]">
               Owned
@@ -333,26 +360,40 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
         )}
 
         {/* 結果バー */}
-        <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
+        <div className="mt-2 flex items-center justify-between text-xs text-slate-600 gap-3 flex-wrap">
           <span>
             <span className="font-semibold text-slate-900">
               {results.length}
             </span>{" "}
             件 / 全 {all.length} 件
           </span>
-          <label className="inline-flex items-center gap-1 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={purchasedOnly}
-              onChange={(e) => setPurchasedOnly(e.target.checked)}
-              className="accent-emerald-600"
-            />
-            <span>購入済のみ</span>
-          </label>
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-1.5 cursor-pointer min-h-[28px]">
+              <input
+                type="checkbox"
+                checked={halfPriceOnly}
+                onChange={(e) => setHalfPriceOnly(e.target.checked)}
+                className="accent-amber-500 w-4 h-4"
+              />
+              <span className="inline-flex items-center gap-1">
+                <span className="text-amber-600">✨</span>
+                半額のみ
+              </span>
+            </label>
+            <label className="inline-flex items-center gap-1.5 cursor-pointer min-h-[28px]">
+              <input
+                type="checkbox"
+                checked={purchasedOnly}
+                onChange={(e) => setPurchasedOnly(e.target.checked)}
+                className="accent-emerald-600 w-4 h-4"
+              />
+              <span>購入済のみ</span>
+            </label>
+          </div>
         </div>
 
-        {/* ランクフィルター：トグルチップ式（44pxタップ領域確保） */}
-        <div className="mt-2 -mx-1 px-1 overflow-x-auto">
+        {/* ランクフィルター：3チップ（鮮度のみ） */}
+        <div className="mt-2 -mx-1 px-1 overflow-x-auto snap-x-chips">
           <div className="flex items-center gap-1.5 flex-nowrap">
             <RankToggle
               active={rankFilter.platinum}
@@ -360,6 +401,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
                 setRankFilter((s) => ({ ...s, platinum: !s.platinum }))
               }
               label="プラチナ"
+              hint="1時間以内 ¥1,000"
               dot="bg-slate-900 ring-1 ring-amber-400"
               activeClass="bg-slate-900 text-amber-300 border-slate-900"
             />
@@ -369,6 +411,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
                 setRankFilter((s) => ({ ...s, emerald: !s.emerald }))
               }
               label="エメラルド"
+              hint="3時間以内 ¥600"
               dot="bg-emerald-600"
               activeClass="bg-emerald-600 text-white border-emerald-700"
             />
@@ -378,17 +421,9 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
                 setRankFilter((s) => ({ ...s, silver: !s.silver }))
               }
               label="シルバー"
+              hint="3時間超 ¥200"
               dot="bg-slate-400"
               activeClass="bg-slate-300 text-slate-900 border-slate-400"
-            />
-            <RankToggle
-              active={rankFilter.repurchase}
-              onClick={() =>
-                setRankFilter((s) => ({ ...s, repurchase: !s.repurchase }))
-              }
-              label="更新版"
-              dot="bg-amber-400"
-              activeClass="bg-amber-400 text-amber-900 border-amber-500"
             />
           </div>
         </div>
@@ -474,12 +509,14 @@ function RankToggle({
   active,
   onClick,
   label,
+  hint,
   dot,
   activeClass,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  hint?: string;
   dot: string;
   activeClass: string;
 }) {
@@ -488,6 +525,7 @@ function RankToggle({
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      title={hint}
       className={`shrink-0 inline-flex items-center gap-1.5 h-10 px-3 rounded-full border-2 text-xs font-bold transition-colors active:scale-[0.97] ${
         active
           ? activeClass
@@ -496,6 +534,13 @@ function RankToggle({
     >
       <span className={`w-2 h-2 rounded-full ${dot}`} />
       <span>{label}</span>
+      {hint && (
+        <span
+          className={`text-[10px] font-normal ${active ? "opacity-80" : "opacity-50"}`}
+        >
+          {hint}
+        </span>
+      )}
     </button>
   );
 }

@@ -60,20 +60,24 @@ export function EmailRestoreDialog({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white rounded-t-2xl md:rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="sticky top-0 bg-white flex items-center justify-between p-4 border-b border-slate-200">
+      <div className="bg-white rounded-t-2xl md:rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] flex flex-col">
+        <div className="shrink-0 bg-white flex items-center justify-between p-4 border-b border-slate-200">
           <h2 id="restore-title" className="font-bold">
             購入を復元
           </h2>
           <button
             onClick={onClose}
-            className="inline-flex items-center justify-center w-11 h-11 rounded-full hover:bg-slate-100"
+            className="inline-flex items-center justify-center w-11 h-11 rounded-full hover:bg-slate-100 active:bg-slate-200"
             aria-label="閉じる"
           >
             <X size={18} />
           </button>
         </div>
-        <form onSubmit={submit} className="p-4 space-y-3">
+        <form
+          onSubmit={submit}
+          className="flex-1 flex flex-col overflow-y-auto"
+        >
+          <div className="p-4 space-y-3 flex-1">
           <p className="text-sm text-slate-600">
             購入時に Stripe に入力したメールアドレスを入力してください。
             このメアドに紐づく購入履歴を取り出してリストに反映します。
@@ -102,21 +106,25 @@ export function EmailRestoreDialog({
               />
             </div>
           </label>
-          {error && (
-            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
-              {error}
+            {error && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
+                {error}
+              </p>
+            )}
+            <p className="text-xs text-slate-500">
+              ※ メアドのみで認証しています。本格運用時はOTP（メール認証コード）を追加予定です。
             </p>
-          )}
-          <button
-            type="submit"
-            disabled={loading || !email.trim()}
-            className="w-full h-12 rounded-xl bg-slate-900 text-white font-bold active:bg-slate-800 disabled:opacity-50"
-          >
-            {loading ? "問い合わせ中..." : "購入履歴を復元する"}
-          </button>
-          <p className="text-xs text-slate-500">
-            ※ メアドのみで認証しています。本格運用時はOTP（メール認証コード）を追加予定です。
-          </p>
+          </div>
+          {/* sticky フッター（キーボード表示時もボタンが見える） */}
+          <div className="shrink-0 border-t border-slate-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <button
+              type="submit"
+              disabled={loading || !email.trim()}
+              className="w-full h-12 rounded-lg bg-slate-900 text-white font-bold active:bg-slate-800 disabled:opacity-50"
+            >
+              {loading ? "問い合わせ中..." : "購入履歴を復元する"}
+            </button>
+          </div>
         </form>
       </div>
     </div>

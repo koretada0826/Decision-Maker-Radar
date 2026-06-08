@@ -18,10 +18,21 @@ export function getStoredEmail(): string | null {
   }
 }
 
+function normalizeEmail(s: string): string {
+  // 全角英数・空白を半角化、trim、lowercase
+  return s
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) - 0xfee0),
+    )
+    .replace(/[\u3000\s]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 export function setStoredEmail(email: string) {
   if (typeof window === "undefined") return;
   try {
-    const normalized = email.trim().toLowerCase();
+    const normalized = normalizeEmail(email);
     if (!normalized) return;
     localStorage.setItem(EMAIL_KEY, normalized);
   } catch {}

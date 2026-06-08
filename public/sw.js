@@ -1,16 +1,33 @@
 // Service Worker：決裁者レーダー
-// - 静的アセット（HTML/JS/CSS/画像）は stale-while-revalidate
-// - APIコール（/api/*）は network only（キャッシュしない）
-// - オフライン時は直近の HTML を返す
+// - install で失敗してSW死亡を避けるため allSettled で個別put
+// - HTML は network only（認証コンテンツのキャッシュで情報漏洩を防止）
+// - 静的アセットのみ cache first
+// - API は常にネットワーク
 
-const CACHE_NAME = "kr-static-v1";
-const PRECACHE_URLS = ["/search", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE_VERSION = "kr-v3";
+const CACHE_NAME = `${CACHE_VERSION}-static`;
+const PRECACHE_URLS = [
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)),
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      // All-or-nothing 失敗を防ぐため個別 put
+      await Promise.allSettled(
+        PRECACHE_URLS.map(async (u) => {
+          try {
+            const res = await fetch(u, { cache: "no-cache" });
+            if (res.ok) await cache.put(u, res);
+          } catch {}
+        }),
+      );
+      self.skipWaiting();
+    })(),
   );
-  self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
@@ -18,11 +35,17 @@ self.addEventListener("activate", (event) => {
     (async () => {
       const keys = await caches.keys();
       await Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
+        keys
+          .filter((k) => !k.startsWith(CACHE_VERSION))
+          .map((k) => caches.delete(k)),
       );
       await self.clients.claim();
     })(),
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("fetch", (event) => {
@@ -30,16 +53,17 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
 
-  // 同一オリジン以外はそのまま
   if (url.origin !== self.location.origin) return;
 
   // API は常にネットワーク（キャッシュしない）
   if (url.pathname.startsWith("/api/")) {
-    event.respondWith(fetch(req).catch(() => new Response("", { status: 503 })));
+    event.respondWith(
+      fetch(req).catch(() => new Response("", { status: 503 })),
+    );
     return;
   }
 
-  // Next.js のコードチャンクと静的アセット：cache first
+  // 静的アセットは cache first
   if (
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/")
@@ -48,34 +72,32 @@ self.addEventListener("fetch", (event) => {
       caches.match(req).then(
         (cached) =>
           cached ||
-          fetch(req).then((res) => {
-            const clone = res.clone();
-            caches.open(CACHE_NAME).then((c) => c.put(req, clone));
-            return res;
-          }),
+          fetch(req)
+            .then((res) => {
+              if (res.ok) {
+                const clone = res.clone();
+                caches.open(CACHE_NAME).then((c) => c.put(req, clone));
+              }
+              return res;
+            })
+            .catch(() => new Response("", { status: 503 })),
       ),
     );
     return;
   }
 
-  // それ以外（HTML 等）：network first → fail なら cache
+  // HTMLは network only（認証コンテンツの誤キャッシュで情報漏洩を防ぐ）
+  // オフライン時のみ最低限のフォールバック
   event.respondWith(
-    fetch(req)
-      .then((res) => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put(req, clone));
-        return res;
-      })
-      .catch(() =>
-        caches.match(req).then(
-          (cached) =>
-            cached ||
-            caches.match("/search") ||
-            new Response("オフラインです", {
-              status: 503,
-              headers: { "Content-Type": "text/plain; charset=utf-8" },
-            }),
+    fetch(req).catch(
+      () =>
+        new Response(
+          "<!doctype html><meta charset='utf-8'><body style='font-family:sans-serif;padding:2rem;text-align:center'>オフラインです。ネットワーク接続を確認してください。</body>",
+          {
+            status: 503,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          },
         ),
-      ),
+    ),
   );
 });
