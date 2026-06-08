@@ -23,9 +23,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const show = useCallback((message: string, tone: ToastTone = "success") => {
     const id = Date.now() + Math.random();
     setItems((prev) => [...prev, { id, tone, message }]);
+    // エラーは見逃しが致命的なので長めに表示
+    const ttl = tone === "error" ? 6000 : 4000;
     setTimeout(() => {
       setItems((prev) => prev.filter((t) => t.id !== id));
-    }, 2600);
+    }, ttl);
   }, []);
 
   return (

@@ -53,6 +53,8 @@ function AdminPageInner() {
     count: number;
     totalAmount: number;
   } | null>(null);
+  const [serverLeadsCount, setServerLeadsCount] = useState<number | null>(null);
+  const [resyncing, setResyncing] = useState(false);
 
   useEffect(() => {
     try {
@@ -83,7 +85,60 @@ function AdminPageInner() {
         }
       })
       .catch(() => {});
+    // サーバー側のリード件数を取得して、ローカルとの mismatch を検知
+    fetch("/api/leads")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok && Array.isArray(data.leads)) {
+          setServerLeadsCount(data.leads.length);
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  // ローカルに保存されているデータをサーバーに再送信する
+  async function resyncToServer() {
+    if (resyncing) return;
+    setResyncing(true);
+    try {
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leads: uploaded.map((l) => ({
+            id: l.id,
+            dedup_key: l.dedup_key ?? null,
+            company_name: l.company_name,
+            address: l.address ?? null,
+            ward: l.ward ?? null,
+            industry: l.industry ?? null,
+            size: l.size ?? null,
+            phone: l.phone ?? null,
+            memo: l.memo ?? null,
+            rank: l.rank ?? null,
+            score: l.score ?? null,
+            contact_time: l.contact_time ?? null,
+            contact_person_type: l.contact_person_type ?? null,
+            call_result: l.call_result ?? null,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        toast.show(
+          `${data.upserted} 件をサーバーに同期しました`,
+          "success",
+        );
+        setServerLeadsCount(data.upserted);
+      } else {
+        toast.show("サーバー同期に失敗しました", "error");
+      }
+    } catch {
+      toast.show("通信エラーで同期できませんでした", "error");
+    } finally {
+      setResyncing(false);
+    }
+  }
 
   const purchasedLeads = useMemo(
     () => uploaded.filter((l) => purchased.has(l.id)),
@@ -207,6 +262,37 @@ function AdminPageInner() {
       </header>
 
       <main className="px-3 py-4 space-y-3 max-w-3xl mx-auto">
+        {/* ローカルとサーバーの件数mismatch警告 */}
+        {SUPABASE_CONFIGURED &&
+          serverLeadsCount !== null &&
+          uploaded.length > 0 &&
+          serverLeadsCount !== uploaded.length && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <ShieldAlert
+                size={16}
+                className="shrink-0 mt-0.5 text-amber-700"
+                aria-hidden="true"
+              />
+              <div className="flex-1">
+                <strong>サーバーに未同期のデータがあります</strong>
+                <br />
+                このブラウザ: {uploaded.length}件 / サーバー: {serverLeadsCount}件
+                <br />
+                <span className="text-[11px] text-amber-700">
+                  サーバーに同期しないと営業担当のスマホには表示されません。
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={resyncToServer}
+                disabled={resyncing}
+                className="shrink-0 inline-flex items-center justify-center h-11 px-4 rounded-lg bg-amber-600 text-white font-bold text-sm active:bg-amber-700 disabled:opacity-50"
+              >
+                {resyncing ? "同期中…" : "サーバーに同期する"}
+              </button>
+            </div>
+          )}
+
         {!SUPABASE_CONFIGURED && (
           <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900 flex gap-2">
             <ShieldAlert size={16} className="shrink-0 mt-0.5 text-red-700" />
