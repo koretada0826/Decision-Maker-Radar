@@ -283,9 +283,19 @@ export function CsvUploadDialog({
           const phoneVal = getCell(r, colMap, "phone") || null;
           const sizeVal = sizeCol ? (r[sizeCol] ?? "").toString().trim() || null : null;
           const dedupKey = makeDedupKey(companyName, phoneVal);
-          // id は dedup_key 基準で安定化（CSV再取込で同じ会社が別IDに化けるのを防ぐ）
+          // id は dedup_key を hash化（CSV再取込で同じ会社が別IDに化けるのを防ぐ＋ASCII化）
+          // 旧実装は Japanese を全部 strip してたので「|電話番号」だけになり、
+          // 電話なしの会社が全部同じIDで衝突する致命バグがあった。
+          // djb2 hash で安定化＋衝突を緩和。
+          function djb2Hash(s: string): string {
+            let h = 5381;
+            for (let j = 0; j < s.length; j++) {
+              h = ((h << 5) + h + s.charCodeAt(j)) >>> 0;
+            }
+            return h.toString(36);
+          }
           const stableId = dedupKey
-            ? `lead-${dedupKey.replace(/[^a-z0-9|]/g, "").slice(0, 80)}`
+            ? `lead-${djb2Hash(dedupKey)}-${djb2Hash(companyName + i)}`
             : `csv-${Date.now()}-${i}`;
           leads.push({
             id: stableId,

@@ -116,13 +116,29 @@ function AdminPageInner() {
   async function resyncToServer() {
     if (resyncing) return;
     setResyncing(true);
+    // 旧バージョンの壊れた id を修復（Japanese strip による衝突を解消）
+    function djb2Hash(s: string): string {
+      let h = 5381;
+      for (let j = 0; j < s.length; j++) {
+        h = ((h << 5) + h + s.charCodeAt(j)) >>> 0;
+      }
+      return h.toString(36);
+    }
+    function repairId(l: Lead, idx: number): string {
+      // 旧IDが「lead-|XXX」みたいに本体が剥がされている場合は再生成
+      const looksBroken =
+        l.id.startsWith("lead-|") || l.id.length < 8 || l.id === "lead-";
+      if (!looksBroken) return l.id;
+      const key = l.dedup_key || l.company_name;
+      return `lead-${djb2Hash(key)}-${djb2Hash(l.company_name + idx)}`;
+    }
     try {
       const res = await fetch("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          leads: uploaded.map((l) => ({
-            id: l.id,
+          leads: uploaded.map((l, idx) => ({
+            id: repairId(l, idx),
             dedup_key: l.dedup_key ?? null,
             company_name: l.company_name,
             address: l.address ?? null,

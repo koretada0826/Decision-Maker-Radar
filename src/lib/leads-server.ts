@@ -33,11 +33,33 @@ export async function bulkUpsertLeads(
   }
   if (leads.length === 0) return { ok: true, upserted: 0 };
   const supabase = createSupabaseServiceRole();
+
+  // バッチ内の id 重複を排除（Postgres は同一バッチ内で同じ primary key を許さない）
+  // 同じ dedup_key の null/空文字も unique 制約で衝突するため null 化する
+  const seenIds = new Set<string>();
+  const seenDedupKeys = new Set<string>();
+  const safeLeads = leads
+    .filter((l) => {
+      if (seenIds.has(l.id)) return false;
+      seenIds.add(l.id);
+      return true;
+    })
+    .map((l) => {
+      // 中身のないdedup_key（"|"のみ等）は null に。partial unique index の影響を受けないように
+      const dk = (l.dedup_key ?? "").trim();
+      const cleanDk = dk && dk !== "|" && dk.length > 1 ? dk : null;
+      // バッチ内で既出のdedup_keyも null 化（unique 制約衝突回避）
+      const finalDk =
+        cleanDk && seenDedupKeys.has(cleanDk) ? null : cleanDk;
+      if (finalDk) seenDedupKeys.add(finalDk);
+      return { ...l, dedup_key: finalDk };
+    });
+
   // 100件ずつチャンク化
   const CHUNK = 100;
   let total = 0;
-  for (let i = 0; i < leads.length; i += CHUNK) {
-    const chunk = leads.slice(i, i + CHUNK);
+  for (let i = 0; i < safeLeads.length; i += CHUNK) {
+    const chunk = safeLeads.slice(i, i + CHUNK);
     const { error } = await supabase
       .from("leads")
       .upsert(
@@ -45,6 +67,7 @@ export async function bulkUpsertLeads(
         { onConflict: "id" },
       );
     if (error) {
+      console.error("[bulkUpsertLeads] error:", error.message, error.details);
       return {
         ok: false,
         upserted: total,
