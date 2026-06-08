@@ -96,6 +96,22 @@ function AdminPageInner() {
       .catch(() => {});
   }, []);
 
+  // ローカルとサーバーの件数 mismatch を検知したら自動同期
+  // （uploaded が localStorage から復元された後にチェック）
+  useEffect(() => {
+    if (!SUPABASE_CONFIGURED) return;
+    if (serverLeadsCount === null) return;
+    if (uploaded.length === 0) return;
+    if (serverLeadsCount === uploaded.length) return;
+    // 自動同期発火条件：ローカルに件数あり、サーバーと不一致
+    console.log(
+      `[admin] auto-syncing ${uploaded.length} leads to server (server has ${serverLeadsCount})`,
+    );
+    resyncToServer();
+    // resyncToServer は state を更新するので deps から除外（一度だけ走らせる）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverLeadsCount, uploaded.length]);
+
   // ローカルに保存されているデータをサーバーに再送信する
   async function resyncToServer() {
     if (resyncing) return;
