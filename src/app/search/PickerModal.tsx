@@ -100,10 +100,6 @@ export function PickerModal({
       }}
     >
       <div className="bg-white w-full max-h-[90dvh] rounded-t-2xl shadow-xl flex flex-col">
-        {/* スワイプダウン用ハンドル */}
-        <div className="shrink-0 flex justify-center pt-2">
-          <div className="w-10 h-1.5 rounded-full bg-slate-300" />
-        </div>
       {/* ヘッダー */}
       <header className="shrink-0 sticky top-0 bg-white border-b border-slate-200">
         <div className="h-14 px-2 flex items-center gap-1">
@@ -141,7 +137,7 @@ export function PickerModal({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={meta.placeholder}
-              className="w-full h-11 pl-9 pr-9 rounded-none bg-slate-100 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white"
+              className="w-full h-11 pl-9 pr-9 rounded-lg bg-slate-100 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:bg-white"
               autoComplete="off"
             />
             {query && (
@@ -218,7 +214,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return (
     <span>
       {text.slice(0, idx)}
-      <mark className="bg-yellow-200 text-slate-900 rounded px-0.5">
+      <mark className="bg-amber-100 text-slate-900 rounded px-0.5">
         {text.slice(idx, idx + q.length)}
       </mark>
       {text.slice(idx + q.length)}

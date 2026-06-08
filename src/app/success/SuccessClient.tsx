@@ -101,10 +101,15 @@ export function SuccessClient({
         {isSingleLead && (
           <div className="mt-6 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4 text-left">
             <div className="font-bold text-emerald-900">リード1件</div>
-            <div className="text-xs text-emerald-800 mt-1">
-              {registered
-                ? "✓ 詳細（住所・電話・メモ）を解放しました"
-                : "解放中…"}
+            <div className="text-xs text-emerald-800 mt-1 inline-flex items-center gap-1">
+              {registered ? (
+                <>
+                  <CheckCircle2 size={14} aria-hidden="true" />
+                  詳細（住所・電話・メモ）を解放しました
+                </>
+              ) : (
+                "登録処理中…"
+              )}
             </div>
           </div>
         )}

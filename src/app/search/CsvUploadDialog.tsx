@@ -184,7 +184,7 @@ export function CsvUploadDialog({
         const hasTimeCol = !!colMap.contact_time;
         if (!hasTimeCol) {
           notes.push(
-            "接触日時の列が見つからないため、全件「シルバー」（¥200）扱いで登録します。鮮度判定が不可能なため、安全側に倒します。",
+            "接触日時の列がないため、すべて「シルバー（¥200）」として登録します。最新の鮮度判定はできません。",
           );
         }
 
@@ -192,7 +192,7 @@ export function CsvUploadDialog({
         const hasPersonCol = !!colMap.contact_person_type;
         if (!hasPersonCol) {
           notes.push(
-            "接触相手の列が見つからないため、全行を「決裁者接触」として登録します。",
+            "接触相手の列がないため、すべて「決裁者接触」として登録します。",
           );
         }
 
@@ -301,6 +301,13 @@ export function CsvUploadDialog({
           added++;
         }
 
+        // データ行が0の場合（ヘッダーだけのCSV）専用エラー
+        if (rows.length === 0) {
+          setError("ファイルにデータ行がありません。ヘッダーだけのCSVのようです。");
+          setLoading(false);
+          return;
+        }
+
         setSummary({
           total: rows.length,
           added,
@@ -313,8 +320,8 @@ export function CsvUploadDialog({
         if (leads.length > 0) onAdd(leads);
         setLoading(false);
       },
-      error: (err: Error) => {
-        setError(err.message);
+      error: () => {
+        setError("CSVの形式が認識できませんでした。Excelで「CSV UTF-8」として保存し直してお試しください。");
         setLoading(false);
       },
     });
@@ -345,7 +352,7 @@ export function CsvUploadDialog({
         <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-3 text-sm">
           <p className="text-slate-600">
-            業務で使っているCSV（日本語の列名OK）をそのまま取り込めます。会社名・住所・電話番号・業種・担当者・結果・備考などの列を自動認識します。
+            お手元のCSVをそのまま取り込めます（日本語の列名OK）。
           </p>
 
           <details className="text-xs text-slate-600 bg-slate-50 rounded-lg p-3">
@@ -422,14 +429,19 @@ export function CsvUploadDialog({
                     : "bg-red-50 text-red-900 border border-red-200"
                 }`}
               >
-                <div className="font-bold">
+                <div className="font-bold tabular-nums">
                   {summary.added > 0
                     ? `${summary.added}件 をリストに追加しました`
-                    : "0件しか追加されませんでした"}
+                    : "追加できたデータがありませんでした"}
                 </div>
-                <div className="text-xs mt-1">
-                  総行数 {summary.total} / クレーム等で除外 {summary.excluded} / 必須項目エラー {summary.errors}
+                <div className="text-xs mt-1 tabular-nums">
+                  総行数: {summary.total} 件 ／ 除外: {summary.excluded} 件 ／ エラー: {summary.errors} 件
                 </div>
+                {summary.added === 0 && (
+                  <div className="text-xs mt-2 text-red-800">
+                    列名（会社名・住所など）が認識できなかった可能性があります。下の「検出された列のマッピング」をご確認ください。
+                  </div>
+                )}
                 {/* リスト確認ボタンは sticky フッターへ移動済み */}
               </div>
 

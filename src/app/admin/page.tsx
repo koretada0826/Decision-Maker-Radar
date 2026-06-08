@@ -9,9 +9,13 @@ import {
   Trash2,
   RotateCcw,
   X as XIcon,
+  Clock,
+  CheckCircle2,
 } from "lucide-react";
 import { CsvUploadDialog } from "@/app/search/CsvUploadDialog";
 import { AdminAuthGate } from "@/components/AdminAuthGate";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/Toast";
 import {
   getPurchasedIds,
   setPurchasedIds,
@@ -20,6 +24,11 @@ import {
   LEAD_PRICE_JPY,
 } from "@/lib/purchases";
 import type { Lead } from "@/lib/types";
+
+const LAST_IMPORT_KEY = "kr-last-import-v1";
+const SUPABASE_CONFIGURED =
+  !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+  !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 const STORAGE_KEY = "kr-uploaded-leads-v2";
 
@@ -32,17 +41,35 @@ export default function AdminPage() {
 }
 
 function AdminPageInner() {
+  const toast = useToast();
   const [uploaded, setUploaded] = useState<Lead[]>([]);
   const [purchased, setPurchased] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
+  const [lastImport, setLastImport] = useState<number | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [confirmResetPurchases, setConfirmResetPurchases] = useState(false);
+  const [confirmRemoveOne, setConfirmRemoveOne] = useState<Lead | null>(null);
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(parsed)) setUploaded(parsed as Lead[]);
+      if (Array.isArray(parsed))
+        setUploaded(
+          parsed.filter(
+            (x): x is Lead =>
+              x != null &&
+              typeof x === "object" &&
+              typeof x.id === "string" &&
+              typeof x.company_name === "string",
+          ),
+        );
     } catch {}
     setPurchased(new Set(getPurchasedIds()));
+    try {
+      const ts = localStorage.getItem(LAST_IMPORT_KEY);
+      if (ts) setLastImport(parseInt(ts, 10) || null);
+    } catch {}
   }, []);
 
   const purchasedLeads = useMemo(
@@ -64,21 +91,18 @@ function AdminPageInner() {
     setUploaded(deduped);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(deduped));
+      const now = Date.now();
+      localStorage.setItem(LAST_IMPORT_KEY, String(now));
+      setLastImport(now);
     } catch (e) {
       const msg = (e as Error)?.name === "QuotaExceededError"
-        ? "ブラウザの保存容量を超えました。古い取込データを削除してください。"
-        : "保存に失敗しました。";
-      alert(msg);
+        ? "ブラウザの保存容量を超えました。古い取り込みデータを削除してください。"
+        : "保存に失敗しました。時間をおいて再度お試しください。";
+      toast.show(msg, "error");
     }
   }
 
-  async function resetPurchases() {
-    if (
-      !confirm(
-        `購入履歴 ${purchased.size} 件をリセットします。\nリストは未購入の状態に戻り、住所/電話/メモは再ロックされます。よろしいですか？`,
-      )
-    )
-      return;
+  async function resetPurchasesImpl() {
     setPurchasedIds([]);
     setPurchased(new Set());
     const email = getStoredEmail();
@@ -89,10 +113,10 @@ function AdminPageInner() {
         });
       } catch {}
     }
+    toast.show("購入履歴をリセットしました", "success");
   }
 
-  async function removeSinglePurchase(lead: Lead) {
-    if (!confirm(`「${lead.company_name}」を未購入に戻しますか？`)) return;
+  async function removeSinglePurchaseImpl(lead: Lead) {
     removePurchasedId(lead.id);
     setPurchased((s) => {
       const next = new Set(s);
@@ -108,6 +132,7 @@ function AdminPageInner() {
         );
       } catch {}
     }
+    toast.show(`「${lead.company_name}」を未購入に戻しました`, "success");
   }
 
   return (
@@ -126,22 +151,40 @@ function AdminPageInner() {
       </header>
 
       <main className="px-3 py-4 space-y-3 max-w-3xl mx-auto">
-        <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900 flex gap-2">
-          <ShieldAlert size={16} className="shrink-0 mt-0.5 text-red-700" />
-          <div>
-            <strong>⚠️ データが端末ローカルにしか保存されません</strong>
-            <br />
-            Supabase 未設定のため、取り込んだCSV・購入履歴は{" "}
-            <strong>このブラウザ内のみ</strong>に保存されます。
-            <ul className="mt-1 list-disc list-inside space-y-0.5">
-              <li>他の端末（営業マンのスマホ）には共有されません</li>
-              <li>キャッシュクリアで全消失します</li>
-              <li>
-                本番運用前に <code className="bg-red-100 px-1 rounded">.env.local</code> に Supabase 設定が必須です
-              </li>
-            </ul>
+        {!SUPABASE_CONFIGURED && (
+          <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900 flex gap-2">
+            <ShieldAlert size={16} className="shrink-0 mt-0.5 text-red-700" />
+            <div>
+              <strong>このブラウザにだけ保存されます</strong>
+              <br />
+              データベースが未接続のため、取り込んだCSV・購入履歴は
+              <strong>このブラウザの中だけ</strong>に残ります。
+              <ul className="mt-1 list-disc list-inside space-y-0.5">
+                <li>他の端末（営業マンのスマホ）には共有されません</li>
+                <li>キャッシュを消すとデータも消えます</li>
+              </ul>
+            </div>
           </div>
-        </div>
+        )}
+
+        {SUPABASE_CONFIGURED && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 flex gap-2">
+            <CheckCircle2 size={16} className="shrink-0 mt-0.5 text-emerald-700" aria-hidden="true" />
+            <div>
+              <strong>データベース接続済み。</strong>
+              購入履歴は端末を越えて共有されます。
+            </div>
+          </div>
+        )}
+
+        {lastImport && (
+          <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 flex items-center gap-2">
+            <Clock size={14} className="shrink-0 text-slate-500" aria-hidden="true" />
+            <span className="tabular-nums">
+              最終取り込み: {formatRelativeTime(lastImport)}
+            </span>
+          </div>
+        )}
 
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 flex gap-2">
           <ShieldAlert size={16} className="shrink-0 mt-0.5" />
@@ -155,24 +198,25 @@ function AdminPageInner() {
           <div className="p-4 border-b border-slate-100">
             <h2 className="font-bold text-slate-900">CSVインポート</h2>
             <p className="text-xs text-slate-500 mt-1">
-              テレアポ済みの代表者・決裁者接触データを取り込みます。クレーム/強い拒否は自動除外。
+              テレアポで代表者や決裁者に当たれた顧客データを取り込みます。クレーム・強い拒否は自動で除外されます。
             </p>
           </div>
-          <div className="p-4 flex items-center gap-3">
+          <div className="p-4 flex items-center gap-3 flex-wrap">
             <button
+              type="button"
               onClick={() => setOpen(true)}
               className="inline-flex items-center gap-2 h-11 px-4 rounded-lg bg-slate-900 text-white font-bold active:bg-slate-800 active:scale-[0.98] transition-transform"
             >
-              <Upload size={16} />
+              <Upload size={16} aria-hidden="true" />
               CSVを取り込む
             </button>
             <a
               href="/api/sample-csv"
               download
-              className="text-sm text-brand-700 underline"
-              title="アクセスした時刻基準でプラチナ/エメラルド/シルバーが揃うサンプル"
+              className="text-sm text-slate-700 underline"
+              title="アクセス時の時刻基準で3ランクが揃うサンプル"
             >
-              動作確認用サンプルをDL（毎回新鮮）
+              サンプルCSVをダウンロード（毎回最新の時刻で生成）
             </a>
           </div>
         </section>
@@ -180,23 +224,16 @@ function AdminPageInner() {
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="p-4 border-b border-slate-100 flex items-center">
             <h2 className="font-bold text-slate-900">取り込み済みデータ</h2>
-            <span className="ml-2 text-xs bg-emerald-100 text-emerald-800 rounded px-2 py-0.5">
+            <span className="ml-2 text-xs bg-emerald-100 text-emerald-800 rounded px-2 py-0.5 tabular-nums">
               {uploaded.length} 件
             </span>
             {uploaded.length > 0 && (
               <button
-                onClick={() => {
-                  if (
-                    confirm(
-                      `${uploaded.length} 件の取り込みデータを全て削除します。よろしいですか？`,
-                    )
-                  ) {
-                    save([]);
-                  }
-                }}
-                className="ml-auto inline-flex items-center gap-1 h-10 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100"
+                type="button"
+                onClick={() => setConfirmDeleteAll(true)}
+                className="ml-auto inline-flex items-center gap-1 h-11 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100"
               >
-                <Trash2 size={14} />
+                <Trash2 size={14} aria-hidden="true" />
                 全削除
               </button>
             )}
@@ -227,29 +264,29 @@ function AdminPageInner() {
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="p-4 border-b border-slate-100 flex items-center flex-wrap gap-2">
             <h2 className="font-bold text-slate-900">購入履歴</h2>
-            <span className="text-xs bg-emerald-100 text-emerald-800 rounded px-2 py-0.5">
+            <span className="text-xs bg-emerald-100 text-emerald-800 rounded px-2 py-0.5 tabular-nums">
               {purchased.size} 件
             </span>
             {purchased.size > 0 && (
-              <span className="text-xs text-slate-600">
+              <span className="text-xs text-slate-600 tabular-nums">
                 売上 ¥{totalRevenue.toLocaleString()}
               </span>
             )}
             <button
-              onClick={resetPurchases}
+              type="button"
+              onClick={() => setConfirmResetPurchases(true)}
               disabled={purchased.size === 0}
-              className="ml-auto inline-flex items-center gap-1 h-10 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="ml-auto inline-flex items-center gap-1 h-11 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <RotateCcw size={14} />
+              <RotateCcw size={14} aria-hidden="true" />
               全て未購入に戻す
             </button>
           </div>
           <div className="p-4">
             {purchased.size === 0 ? (
               <p className="text-sm text-slate-500">
-                購入されたリードはまだありません。1件 ¥
-                {LEAD_PRICE_JPY.toLocaleString()}{" "}
-                でリストから「リスト購入」すると、住所・電話・メモが解放されます。
+                まだ購入されたリードはありません。営業マンが1件 ¥
+                {LEAD_PRICE_JPY.toLocaleString()}〜 で詳細を解放できます。
               </p>
             ) : (
               <ul className="divide-y divide-slate-100 max-h-96 overflow-y-auto -mx-4">
@@ -273,20 +310,21 @@ function AdminPageInner() {
                       ¥{LEAD_PRICE_JPY.toLocaleString()}
                     </div>
                     <button
-                      onClick={() => removeSinglePurchase(l)}
-                      className="shrink-0 inline-flex items-center gap-1 h-8 px-2 rounded-lg border border-red-200 bg-white text-red-700 text-xs font-semibold hover:bg-red-50 active:bg-red-100"
+                      type="button"
+                      onClick={() => setConfirmRemoveOne(l)}
+                      className="shrink-0 inline-flex items-center gap-1 h-11 px-3 rounded-lg border border-red-200 bg-white text-red-700 text-xs font-semibold hover:bg-red-50 active:bg-red-100"
                       aria-label={`${l.company_name} を未購入に戻す`}
                       title="このリードを未購入に戻す"
                     >
-                      <XIcon size={12} />
+                      <XIcon size={14} aria-hidden="true" />
                       解除
                     </button>
                   </li>
                 ))}
                 {purchasedLeads.length < purchased.size && (
-                  <li className="px-4 py-3 text-xs text-slate-500 italic">
+                  <li className="px-4 py-3 text-xs text-slate-500 italic tabular-nums">
                     {purchased.size - purchasedLeads.length}{" "}
-                    件は元データが見つかりません（取り込み済みデータから削除された可能性）
+                    件は元データが見つかりません（CSVデータから削除されています）
                   </li>
                 )}
               </ul>
@@ -296,18 +334,14 @@ function AdminPageInner() {
 
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="p-4 border-b border-slate-100">
-            <h2 className="font-bold text-slate-900">運用メモ（MVP）</h2>
+            <h2 className="font-bold text-slate-900">運用メモ</h2>
           </div>
           <div className="p-4 text-xs text-slate-600 space-y-1">
             <p>
-              ・現在は localStorage に保存されます。本番では Supabase にテナント別に保存します。
+              ・営業マンへの配布：取り込み後、共有URL（/search）をLINEで送る → タップで即閲覧。
             </p>
             <p>
-              ・本番化のとき、このページに Supabase Auth を入れて、管理者だけアクセスできるようにします。
-            </p>
-            <p>
-              ・営業マンへの配布方法：管理者がリストを取り込み →
-              チーム共有用URL（/search）を LINE/Slack で配布 → 営業マンはタップで即閲覧。
+              ・CSV運用：毎日同じ時間帯に取り込むと営業マンが「いつ最新版が来るか」を覚えやすい。
             </p>
           </div>
         </section>
@@ -319,6 +353,60 @@ function AdminPageInner() {
           onAdd={(newLeads) => save([...newLeads, ...uploaded])}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteAll}
+        title="取り込みデータをすべて削除"
+        description={`${uploaded.length} 件のCSVデータを削除します。\n営業マンのリストからも消えます。`}
+        confirmLabel="削除する"
+        cancelLabel="やめる"
+        tone="danger"
+        onConfirm={() => {
+          save([]);
+          setConfirmDeleteAll(false);
+          toast.show("取り込みデータをすべて削除しました", "success");
+        }}
+        onCancel={() => setConfirmDeleteAll(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmResetPurchases}
+        title="購入履歴をリセット"
+        description={`購入履歴 ${purchased.size} 件を全削除します。\n詳細（住所・電話）は再ロックされます。`}
+        confirmLabel="リセットする"
+        cancelLabel="やめる"
+        tone="danger"
+        onConfirm={() => {
+          resetPurchasesImpl();
+          setConfirmResetPurchases(false);
+        }}
+        onCancel={() => setConfirmResetPurchases(false)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmRemoveOne}
+        title="未購入に戻しますか？"
+        description={confirmRemoveOne?.company_name}
+        confirmLabel="未購入に戻す"
+        cancelLabel="やめる"
+        onConfirm={() => {
+          if (confirmRemoveOne) removeSinglePurchaseImpl(confirmRemoveOne);
+          setConfirmRemoveOne(null);
+        }}
+        onCancel={() => setConfirmRemoveOne(null)}
+      />
     </div>
   );
+}
+
+function formatRelativeTime(ts: number): string {
+  const diffMs = Date.now() - ts;
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return "たった今";
+  if (diffMin < 60) return `${diffMin}分前`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}時間前`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay}日前`;
+  return new Date(ts).toLocaleDateString("ja-JP");
 }

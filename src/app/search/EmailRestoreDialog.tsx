@@ -79,8 +79,7 @@ export function EmailRestoreDialog({
         >
           <div className="p-4 space-y-3 flex-1">
           <p className="text-sm text-slate-600">
-            購入時に Stripe に入力したメールアドレスを入力してください。
-            このメアドに紐づく購入履歴を取り出してリストに反映します。
+            購入時にStripeへ入力したメールアドレスを入れてください。そのアドレスの購入履歴をリストに復元します。
           </p>
           <label className="block space-y-1">
             <span className="block text-sm font-medium text-slate-700">
@@ -112,7 +111,7 @@ export function EmailRestoreDialog({
               </p>
             )}
             <p className="text-xs text-slate-500">
-              ※ メアドのみで認証しています。本格運用時はOTP（メール認証コード）を追加予定です。
+              ※ 本人確認はメールアドレスのみで行っています。
             </p>
           </div>
           {/* sticky フッター（キーボード表示時もボタンが見える） */}
@@ -120,9 +119,9 @@ export function EmailRestoreDialog({
             <button
               type="submit"
               disabled={loading || !email.trim()}
-              className="w-full h-12 rounded-lg bg-slate-900 text-white font-bold active:bg-slate-800 disabled:opacity-50"
+              className="w-full h-12 rounded-lg bg-slate-900 text-white font-bold active:bg-slate-800 disabled:opacity-50 active:scale-[0.98] transition-transform"
             >
-              {loading ? "問い合わせ中..." : "購入履歴を復元する"}
+              {loading ? "復元中…" : "購入履歴を復元する"}
             </button>
           </div>
         </form>

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { MapPin, Tag, X } from "lucide-react";
+import { MapPin, Tag, X, Sparkles, Inbox, SearchX } from "lucide-react";
 import { LeadCard } from "./LeadCard";
 import { PickerModal, type PickerOption } from "./PickerModal";
 import { EmailRestoreDialog } from "./EmailRestoreDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/Toast";
 import {
   getPurchasedIds,
   setPurchasedIds,
@@ -20,6 +22,7 @@ import type { Lead } from "@/lib/types";
 const STORAGE_KEY = "kr-uploaded-leads-v2";
 
 export function SearchClient({ initial }: { initial: Lead[] }) {
+  const toast = useToast();
   const [uploaded, setUploaded] = useState<Lead[]>([]);
   const [areas, setAreas] = useState<Set<string>>(new Set());
   const [industries, setIndustries] = useState<Set<string>>(new Set());
@@ -33,6 +36,23 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
   const [picker, setPicker] = useState<"area" | "industry" | null>(null);
   const [purchasedIds, setLocalPurchasedIds] = useState<Set<string>>(new Set());
   const [purchasedKeys, setPurchasedKeys] = useState<Set<string>>(new Set());
+  const [clearAllConfirm, setClearAllConfirm] = useState(false);
+
+  // localStorage疎通テスト（プライベートブラウズや設定で無効化されてないか）
+  useEffect(() => {
+    try {
+      const probe = "_kr_probe";
+      localStorage.setItem(probe, "1");
+      localStorage.removeItem(probe);
+    } catch {
+      toast.show(
+        "このブラウザでは購入記録が保存できません。設定をご確認ください。",
+        "error",
+      );
+    }
+    // 初回マウントのみ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // 60秒ごとに再評価 → 並び順・フィルター・全LeadCardのランクが時間経過で更新される
   // 全体で1本のタイマーに集約（数百カード分の setInterval 並走を回避）
   const [now, setNow] = useState(() => Date.now());
@@ -175,16 +195,16 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
     if (!data.ok) {
       throw new Error(
         data.reason === "supabase_not_configured"
-          ? "サーバー設定が未完了です（Supabaseが必要です）"
-          : `エラー: ${data.reason ?? "不明"}`,
+          ? "現在オンライン復元は利用できません。管理者にお問い合わせください。"
+          : "復元に失敗しました。時間をおいて再度お試しください。",
       );
     }
     if (!data.purchases || data.purchases.length === 0) {
       throw new Error("該当する購入履歴が見つかりませんでした");
     }
     setStoredEmail(normalized);
-    alert(`${data.purchases.length} 件の購入履歴を復元しました。`);
-    window.location.reload();
+    toast.show(`${data.purchases.length} 件の購入履歴を復元しました`, "success");
+    setTimeout(() => window.location.reload(), 800);
   }
 
   const all = useMemo(() => [...uploaded, ...initial], [uploaded, initial]);
@@ -222,10 +242,12 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
       )
       .filter((l) => (areas.size === 0 ? true : areas.has(l.ward)))
       .filter((l) => {
-        // ランクフィルター（OR）：何もチェックなしなら全部通す
+        // ランクフィルター（OR）：何もチェックなし or 全選択ならフィルタなし扱い
         const anyRank =
           rankFilter.platinum || rankFilter.emerald || rankFilter.silver;
-        if (!anyRank) return true;
+        const allRank =
+          rankFilter.platinum && rankFilter.emerald && rankFilter.silver;
+        if (!anyRank || allRank) return true;
         const h = computeHotness(l.contact_time, now);
         if (rankFilter.platinum && h === "platinum") return true;
         if (rankFilter.emerald && h === "emerald") return true;
@@ -284,10 +306,8 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           >
             購入を復元
           </button>
-          <span className="inline-flex items-center gap-1.5 h-7 px-2 bg-white/10 text-white text-[11px] tabular-nums">
-            <span className="text-white/60 uppercase tracking-wider text-[10px]">
-              Owned
-            </span>
+          <span className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-white/10 text-white text-[11px] tabular-nums">
+            <span className="text-white/80 text-[11px]">保有</span>
             {purchasedIds.size} / {all.length}
           </span>
         </div>
@@ -334,31 +354,32 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
               />
             ))}
             <button
+              type="button"
               onClick={() => {
-                if (areas.size + industries.size > 1
-                  ? confirm("選択中の絞り込み条件を全て解除しますか？")
-                  : true) {
+                if (areas.size + industries.size > 1) {
+                  setClearAllConfirm(true);
+                } else {
                   setAreas(new Set());
                   setIndustries(new Set());
                 }
               }}
-              className="inline-flex items-center h-9 px-2.5 text-xs text-slate-600 underline self-center active:bg-slate-100 rounded"
+              className="inline-flex items-center h-11 px-3 text-xs text-slate-600 underline self-center active:bg-slate-100 rounded-md"
             >
-              全てクリア
+              すべて解除
             </button>
           </div>
         )}
 
         {/* 結果バー */}
         <div className="mt-2 flex items-center justify-between text-xs text-slate-600 gap-3 flex-wrap">
-          <span>
+          <span className="tabular-nums">
             <span className="font-semibold text-slate-900">
               {results.length}
-            </span>{" "}
-            件 / 全 {all.length} 件
+            </span>
+            <span> 件 / 全 {all.length} 件</span>
           </span>
           <div className="flex items-center gap-3">
-            <label className="inline-flex items-center gap-1.5 cursor-pointer min-h-[28px]">
+            <label className="inline-flex items-center gap-1.5 cursor-pointer min-h-[44px]">
               <input
                 type="checkbox"
                 checked={halfPriceOnly}
@@ -366,11 +387,11 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
                 className="accent-slate-900 w-4 h-4"
               />
               <span className="inline-flex items-center gap-1">
-                <span className="text-amber-600">✨</span>
+                <Sparkles size={14} className="text-amber-500" aria-hidden="true" />
                 半額のみ
               </span>
             </label>
-            <label className="inline-flex items-center gap-1.5 cursor-pointer min-h-[28px]">
+            <label className="inline-flex items-center gap-1.5 cursor-pointer min-h-[44px]">
               <input
                 type="checkbox"
                 checked={purchasedOnly}
@@ -422,8 +443,8 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
       {/* 取込分のバッジ（クリアは/admin側） */}
       {uploaded.length > 0 && (
         <div className="px-3 pt-2 text-[11px] text-slate-500 flex items-center gap-2">
-          <span className="inline-block bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5">
-            CSV取込分 {uploaded.length} 件を表示中
+          <span className="inline-block bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5 tabular-nums">
+            取り込み分 {uploaded.length} 件を表示中
           </span>
         </div>
       )}
@@ -433,17 +454,15 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
         {results.length === 0 ? (
           all.length === 0 ? (
             <div className="text-center py-16 text-slate-500 text-sm">
-              <div className="text-4xl mb-2">📋</div>
-              リードがまだありません。
-              <br />
-              管理者が CSV を取り込むとここに表示されます。
+              <Inbox size={40} className="mx-auto mb-2 text-slate-400" aria-hidden="true" />
+              <p>まだリードがありません。</p>
+              <p>管理者がCSVを取り込むとここに表示されます。</p>
             </div>
           ) : (
             <div className="text-center py-16 text-slate-500 text-sm">
-              <div className="text-4xl mb-2">🔍</div>
-              該当するリードがありません。
-              <br />
-              上のボタンから条件を変えてください。
+              <SearchX size={40} className="mx-auto mb-2 text-slate-400" aria-hidden="true" />
+              <p>該当するリードがありません。</p>
+              <p>上のボタンから条件を変えてください。</p>
             </div>
           )
         ) : (
@@ -491,6 +510,32 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={clearAllConfirm}
+        title="絞り込み条件を解除しますか？"
+        description="選択中の条件（エリア・業種）がすべて外れます。"
+        confirmLabel="解除する"
+        cancelLabel="やめる"
+        onConfirm={() => {
+          setAreas(new Set());
+          setIndustries(new Set());
+          setClearAllConfirm(false);
+        }}
+        onCancel={() => setClearAllConfirm(false)}
+      />
+
+      <footer className="mt-12 px-4 py-6 border-t border-slate-200 text-[11px] text-slate-500 max-w-3xl mx-auto flex flex-wrap gap-x-4 gap-y-2">
+        <a href="/legal/terms" className="underline">
+          利用規約
+        </a>
+        <a href="/legal/privacy" className="underline">
+          プライバシーポリシー
+        </a>
+        <a href="/legal/tokutei" className="underline">
+          特定商取引法に基づく表記
+        </a>
+      </footer>
     </div>
   );
 }
