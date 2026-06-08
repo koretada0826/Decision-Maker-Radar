@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MapPin, Tag, X } from "lucide-react";
-import Link from "next/link";
-import { Settings } from "lucide-react";
 import { LeadCard } from "./LeadCard";
 import { PickerModal, type PickerOption } from "./PickerModal";
 import { EmailRestoreDialog } from "./EmailRestoreDialog";
@@ -286,14 +284,6 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           >
             購入を復元
           </button>
-          <Link
-            href="/admin"
-            className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-white/10 text-white active:bg-white/20"
-            aria-label="管理者ページ"
-            title="管理者ページ（CSV取込）"
-          >
-            <Settings size={16} />
-          </Link>
           <span className="inline-flex items-center gap-1.5 h-7 px-2 bg-white/10 text-white text-[11px] tabular-nums">
             <span className="text-white/60 uppercase tracking-wider text-[10px]">
               Owned

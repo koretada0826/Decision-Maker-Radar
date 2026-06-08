@@ -11,6 +11,7 @@ import {
   X as XIcon,
 } from "lucide-react";
 import { CsvUploadDialog } from "@/app/search/CsvUploadDialog";
+import { AdminAuthGate } from "@/components/AdminAuthGate";
 import {
   getPurchasedIds,
   setPurchasedIds,
@@ -23,6 +24,14 @@ import type { Lead } from "@/lib/types";
 const STORAGE_KEY = "kr-uploaded-leads-v2";
 
 export default function AdminPage() {
+  return (
+    <AdminAuthGate>
+      <AdminPageInner />
+    </AdminAuthGate>
+  );
+}
+
+function AdminPageInner() {
   const [uploaded, setUploaded] = useState<Lead[]>([]);
   const [purchased, setPurchased] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
@@ -138,7 +147,7 @@ export default function AdminPage() {
           <ShieldAlert size={16} className="shrink-0 mt-0.5" />
           <div>
             <strong>管理者専用ページ。</strong>
-            営業マン画面（/search）右上の歯車アイコンからもアクセスできます。本番運用時はログインを必須化します。
+            URL（/admin）を直接開いてアクセスします。営業マン画面には導線がありません。
           </div>
         </div>
 
