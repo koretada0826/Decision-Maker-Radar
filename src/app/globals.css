@@ -26,9 +26,9 @@ a {
   touch-action: manipulation;
 }
 
-/* キーボード操作時のフォーカス可視化 */
+/* キーボード操作時のフォーカス可視化（半額amberやプラチナとの色衝突を回避するためブランド青を採用） */
 *:focus-visible {
-  outline: 2px solid #fbbf24;
+  outline: 2px solid #2563eb;
   outline-offset: 2px;
 }
 

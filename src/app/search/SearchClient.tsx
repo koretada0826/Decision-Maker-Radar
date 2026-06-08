@@ -373,7 +373,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
                 type="checkbox"
                 checked={halfPriceOnly}
                 onChange={(e) => setHalfPriceOnly(e.target.checked)}
-                className="accent-amber-500 w-4 h-4"
+                className="accent-slate-900 w-4 h-4"
               />
               <span className="inline-flex items-center gap-1">
                 <span className="text-amber-600">✨</span>
@@ -385,7 +385,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
                 type="checkbox"
                 checked={purchasedOnly}
                 onChange={(e) => setPurchasedOnly(e.target.checked)}
-                className="accent-emerald-600 w-4 h-4"
+                className="accent-slate-900 w-4 h-4"
               />
               <span>購入済のみ</span>
             </label>
