@@ -16,7 +16,12 @@ import { getLeadById } from "@/lib/leads-server";
 
 function stripeConfigured() {
   const key = process.env.STRIPE_SECRET_KEY ?? "";
-  return !!key && !key.includes("placeholder");
+  if (!key || key.includes("placeholder")) return false;
+  // 本番ビルドではテストキーを許可しない（顧客がカード入力するのに実決済が走らない事故を防止）
+  if (process.env.NODE_ENV === "production" && !key.startsWith("sk_live_")) {
+    return false;
+  }
+  return true;
 }
 
 type LeadSnapshotBody = {
@@ -99,17 +104,22 @@ export async function POST(req: Request) {
     const name = body.leadName?.trim() || "リード";
 
     // === セキュリティ：価格はサーバーで再計算する ===
-    // フロント送信の contact_time は信用せず、leads テーブルから真の値を引く。
-    // Supabase が未設定の場合のみフォールバックでクライアント送信値を使う（dev環境）。
+    // フロント送信の contact_time は信用しない。leads テーブルから真の値を引く。
+    // - Supabase 未設定（dev環境のみ） → クライアント値を使用
+    // - Supabase 設定済みで lookup 成功 → サーバー値を使用
+    // - Supabase 設定済みで lookup 失敗 → 安全側に倒してシルバー扱い（クライアント値を信用しない）
     let trueContactTime: string | null = null;
+    let supabaseLookupAttempted = false;
     if (supabaseReady()) {
+      supabaseLookupAttempted = true;
       const leadResult = await getLeadById(body.leadId);
       if (leadResult.ok && leadResult.lead) {
         trueContactTime = leadResult.lead.contact_time;
       }
     }
-    const contactTime =
-      trueContactTime ?? body.leadSnapshot?.contact_time ?? null;
+    const contactTime = supabaseLookupAttempted
+      ? trueContactTime // 本番：サーバー値のみ。null ならシルバー固定
+      : (body.leadSnapshot?.contact_time ?? null); // dev：クライアント値を許容
     const serverHotness: HotnessRank = contactTime
       ? computeHotness(contactTime)
       : "silver";

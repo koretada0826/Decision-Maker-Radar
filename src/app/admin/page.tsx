@@ -29,6 +29,10 @@ const LAST_IMPORT_KEY = "kr-last-import-v1";
 const SUPABASE_CONFIGURED =
   !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
   !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const ADMIN_API_TOKEN = process.env.NEXT_PUBLIC_ADMIN_API_TOKEN ?? "";
+const adminHeaders: HeadersInit = ADMIN_API_TOKEN
+  ? { Authorization: `Bearer ${ADMIN_API_TOKEN}` }
+  : {};
 
 const STORAGE_KEY = "kr-uploaded-leads-v2";
 
@@ -49,6 +53,7 @@ function AdminPageInner() {
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [confirmResetPurchases, setConfirmResetPurchases] = useState(false);
   const [confirmRemoveOne, setConfirmRemoveOne] = useState<Lead | null>(null);
+  const [targetEmail, setTargetEmail] = useState("");
   const [serverRevenue, setServerRevenue] = useState<{
     count: number;
     totalAmount: number;
@@ -77,7 +82,7 @@ function AdminPageInner() {
       if (ts) setLastImport(parseInt(ts, 10) || null);
     } catch {}
     // サーバーから実額売上を取得
-    fetch("/api/admin/revenue")
+    fetch("/api/admin/revenue", { headers: adminHeaders })
       .then((r) => r.json())
       .then((data) => {
         if (data.ok) {
@@ -86,6 +91,7 @@ function AdminPageInner() {
       })
       .catch(() => {});
     // サーバー側のリード件数を取得して、ローカルとの mismatch を検知
+    // /api/leads GET は public（営業担当も叩く）なので token は不要
     fetch("/api/leads")
       .then((r) => r.json())
       .then((data) => {
@@ -135,7 +141,7 @@ function AdminPageInner() {
     try {
       const res = await fetch("/api/leads", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...adminHeaders },
         body: JSON.stringify({
           leads: uploaded.map((l, idx) => ({
             id: repairId(l, idx),
@@ -210,7 +216,7 @@ function AdminPageInner() {
       try {
         const res = await fetch("/api/leads", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...adminHeaders },
           body: JSON.stringify({
             leads: deduped.map((l) => ({
               id: l.id,
@@ -259,14 +265,16 @@ function AdminPageInner() {
     toast.show("購入履歴をリセットしました", "success");
   }
 
-  async function removeSinglePurchaseImpl(lead: Lead) {
+  async function removeSinglePurchaseImpl(lead: Lead, targetEmail?: string) {
     removePurchasedId(lead.id);
     setPurchased((s) => {
       const next = new Set(s);
       next.delete(lead.id);
       return next;
     });
-    const email = getStoredEmail();
+    // 営業担当のメアドを指定して、その人の購入履歴だけ削除する
+    // 引数で渡されたら優先、無ければ管理者の保存メアド（後方互換）
+    const email = targetEmail || getStoredEmail();
     if (email) {
       try {
         await fetch(
@@ -405,10 +413,11 @@ function AdminPageInner() {
               <button
                 type="button"
                 onClick={() => setConfirmDeleteAll(true)}
-                className="ml-auto inline-flex items-center gap-1 h-11 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100"
+                className="ml-auto inline-flex items-center gap-1.5 h-11 px-3 rounded-lg bg-red-700 text-white text-sm font-bold active:bg-red-800 shadow-sm"
+                title="CSVデータを全部消す（営業担当画面からも消える）"
               >
                 <Trash2 size={14} aria-hidden="true" />
-                すべて削除
+                CSVデータ全削除
               </button>
             )}
           </div>
@@ -453,10 +462,11 @@ function AdminPageInner() {
               type="button"
               onClick={() => setConfirmResetPurchases(true)}
               disabled={purchased.size === 0}
-              className="ml-auto inline-flex items-center gap-1 h-11 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold active:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="ml-auto inline-flex items-center gap-1.5 h-11 px-3 rounded-lg border-2 border-amber-500 bg-amber-50 text-amber-900 text-sm font-bold active:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="購入履歴を全部消す（CSVデータは消えない）"
             >
               <RotateCcw size={14} aria-hidden="true" />
-              すべて未購入に戻す
+              購入履歴を全リセット
             </button>
           </div>
           <div className="p-4">
@@ -542,7 +552,7 @@ function AdminPageInner() {
           await save([]);
           if (SUPABASE_CONFIGURED) {
             try {
-              await fetch("/api/leads", { method: "DELETE" });
+              await fetch("/api/leads", { method: "DELETE", headers: adminHeaders });
             } catch {}
           }
           setConfirmDeleteAll(false);
@@ -565,18 +575,70 @@ function AdminPageInner() {
         onCancel={() => setConfirmResetPurchases(false)}
       />
 
-      <ConfirmDialog
-        open={!!confirmRemoveOne}
-        title="未購入に戻しますか？"
-        description={confirmRemoveOne?.company_name}
-        confirmLabel="未購入に戻す"
-        cancelLabel="やめる"
-        onConfirm={() => {
-          if (confirmRemoveOne) removeSinglePurchaseImpl(confirmRemoveOne);
-          setConfirmRemoveOne(null);
-        }}
-        onCancel={() => setConfirmRemoveOne(null)}
-      />
+      {confirmRemoveOne && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[4000] bg-black/50 flex items-end md:items-center justify-center p-0 md:p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setConfirmRemoveOne(null);
+              setTargetEmail("");
+            }
+          }}
+        >
+          <div className="bg-white rounded-t-2xl md:rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4">
+            <h2 className="font-bold text-slate-900 text-lg">
+              「{confirmRemoveOne.company_name}」を未購入に戻す
+            </h2>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">
+                対象の営業担当メアド
+              </label>
+              <input
+                type="email"
+                inputMode="email"
+                value={targetEmail}
+                onChange={(e) => setTargetEmail(e.target.value)}
+                placeholder="sales@example.com"
+                className="w-full h-12 px-3 rounded-xl border border-slate-300 text-base bg-white focus:outline-none"
+              />
+              <p className="text-xs text-slate-500">
+                クレーム連絡してきた営業担当のメアドを入力。サーバー側の購入履歴を削除します。
+                空欄なら管理者ブラウザの保存メアドが使われます。
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pb-[max(0rem,env(safe-area-inset-bottom))]">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmRemoveOne(null);
+                  setTargetEmail("");
+                }}
+                className="h-12 rounded-lg border border-slate-300 bg-white text-slate-900 font-bold active:bg-slate-50"
+              >
+                やめる
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirmRemoveOne) {
+                    removeSinglePurchaseImpl(
+                      confirmRemoveOne,
+                      targetEmail.trim() || undefined,
+                    );
+                  }
+                  setConfirmRemoveOne(null);
+                  setTargetEmail("");
+                }}
+                className="h-12 rounded-lg bg-slate-900 text-white font-bold active:bg-slate-800"
+              >
+                未購入に戻す
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

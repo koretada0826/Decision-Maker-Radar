@@ -5,6 +5,12 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { upsertPurchase, supabaseReady } from "@/lib/purchases-server";
 
+function safeParseInt(v: string | undefined | null): number | null {
+  if (!v) return null;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -41,8 +47,9 @@ export async function POST(req: Request) {
   try {
     session = await stripe.checkout.sessions.retrieve(sessionId);
   } catch (e) {
+    console.error("[/api/purchases/record] session retrieve failed:", (e as Error).message);
     return NextResponse.json(
-      { error: `session取得失敗: ${(e as Error).message}` },
+      { error: "決済情報の確認に失敗しました" },
       { status: 400 },
     );
   }
@@ -77,7 +84,7 @@ export async function POST(req: Request) {
       phone: metadata.lead_phone || null,
       memo: metadata.lead_memo || null,
       rank: metadata.lead_rank || null,
-      score: metadata.lead_score ? parseInt(metadata.lead_score, 10) : null,
+      score: safeParseInt(metadata.lead_score),
       contact_time: metadata.lead_contact_time || null,
       contact_person_type: metadata.lead_contact_person_type || null,
       call_result: metadata.lead_call_result || null,
@@ -87,7 +94,8 @@ export async function POST(req: Request) {
       typeof session.payment_intent === "string"
         ? session.payment_intent
         : null,
-    amount: session.amount_total ?? 1000,
+    // null フォールバックを 0 に（¥1000 デフォルトを廃止）
+    amount: session.amount_total ?? 0,
     currency: session.currency ?? "jpy",
   });
 

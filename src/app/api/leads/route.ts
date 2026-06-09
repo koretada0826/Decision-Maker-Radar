@@ -10,6 +10,7 @@ import {
   type LeadInput,
 } from "@/lib/leads-server";
 import { supabaseReady } from "@/lib/purchases-server";
+import { isAdminAuthorized } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +34,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  if (!isAdminAuthorized(req)) {
+    return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
+  }
   if (!supabaseReady()) {
     return NextResponse.json(
       { ok: false, reason: "supabase_not_configured" },
@@ -59,7 +63,10 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, upserted: result.upserted });
 }
 
-export async function DELETE() {
+export async function DELETE(req: Request) {
+  if (!isAdminAuthorized(req)) {
+    return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
+  }
   if (!supabaseReady()) {
     return NextResponse.json(
       { ok: false, reason: "supabase_not_configured" },

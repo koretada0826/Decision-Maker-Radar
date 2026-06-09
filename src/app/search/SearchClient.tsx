@@ -132,13 +132,14 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
           call_result: string | null;
         };
         const purchases = data.purchases as P[];
-        // サーバーが空の場合は localStorage の購入履歴を上書きしない（早期 return）
-        if (purchases.length === 0) return;
         const serverIds = new Set(purchases.map((p) => p.lead_id));
-        // localStorage と merge（ローカル分も保持）
-        const merged = new Set([...getPurchasedIds(), ...serverIds]);
-        setPurchasedIds(Array.from(merged));
-        setLocalPurchasedIds(merged);
+        // サーバーを真として localStorage を置き換える（管理者が単件解除した分はここで消える）
+        // 例外：サーバーが「空配列」を返した場合のみ、Stripe webhook 遅延の可能性があるので
+        // localStorage を維持（保守的）。ただしサーバー側で削除済みのものは復活してしまうので、
+        // 確実に解除したい場合は admin から個別解除＋営業端末再ロードが必要。
+        if (purchases.length === 0) return;
+        setPurchasedIds(Array.from(serverIds));
+        setLocalPurchasedIds(serverIds);
         // 元データが localStorage に無いリードは「購入したけど取り込み済み未登録」状態
         // → サーバーのスナップショットから復元してリストに表示する
         try {
@@ -166,7 +167,11 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
               phone: p.phone,
               rank: (p.rank ?? "D") as Lead["rank"],
               score: p.score ?? 0,
-              contact_time: p.contact_time ?? new Date().toISOString(),
+              // 元の contact_time が無ければ「10年前」固定でシルバー扱いにする
+              // （Date.now() フォールバックだと復元時にプラチナ¥1000化する事故を防止）
+              contact_time:
+                p.contact_time ??
+                new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000).toISOString(),
               contact_person_type:
                 (p.contact_person_type ??
                   "decision_maker") as Lead["contact_person_type"],
@@ -188,7 +193,7 @@ export function SearchClient({ initial }: { initial: Lead[] }) {
   const [restoreOpen, setRestoreOpen] = useState(false);
 
   async function restoreByEmail(email: string) {
-    // 全角・スペース・大文字を正規化（CSV取り込みCSV取り込みでも同じ正規化を使う）
+    // 全角・スペース・大文字を正規化（CSV取り込みでも同じ正規化を使う）
     const normalized = normalizeEmail(email);
     // 12秒でタイムアウトする AbortController
     const controller = new AbortController();

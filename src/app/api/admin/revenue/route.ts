@@ -4,11 +4,15 @@
 
 import { NextResponse } from "next/server";
 import { getRevenueSummary, supabaseReady } from "@/lib/purchases-server";
+import { isAdminAuthorized } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isAdminAuthorized(req)) {
+    return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
+  }
   if (!supabaseReady()) {
     return NextResponse.json(
       { ok: false, reason: "supabase_not_configured" },

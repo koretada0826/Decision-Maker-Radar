@@ -3,6 +3,17 @@
 
 import { createSupabaseServiceRole } from "@/lib/supabase/server";
 
+// 全角→半角・空白除去・小文字化（クライアント側 purchases.ts の normalizeEmail と同等）
+function normalizeEmail(s: string): string {
+  return s
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) - 0xfee0),
+    )
+    .replace(/[\u3000\s]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 export type LeadSnapshot = {
   company_name: string;
   address?: string | null;
@@ -92,7 +103,7 @@ export async function hasAlreadyPurchased(opts: {
   const { data, error } = await supabase
     .from("purchases")
     .select("id, company_name, created_at")
-    .eq("email", opts.email.toLowerCase().trim())
+    .eq("email", normalizeEmail(opts.email))
     .eq("dedup_key", opts.dedupKey)
     .eq("status", "completed")
     .limit(1);
@@ -118,7 +129,7 @@ export async function deletePurchase(opts: {
   const { error, count } = await supabase
     .from("purchases")
     .delete({ count: "exact" })
-    .eq("email", opts.email.toLowerCase().trim())
+    .eq("email", normalizeEmail(opts.email))
     .eq("lead_id", opts.leadId);
   if (error) return { ok: false as const, reason: error.message };
   return { ok: true as const, deleted: count ?? 0 };
@@ -132,7 +143,7 @@ export async function deleteAllPurchasesByEmail(email: string) {
   const { error, count } = await supabase
     .from("purchases")
     .delete({ count: "exact" })
-    .eq("email", email.toLowerCase().trim());
+    .eq("email", normalizeEmail(email));
   if (error) return { ok: false as const, reason: error.message };
   return { ok: true as const, deleted: count ?? 0 };
 }
@@ -145,7 +156,7 @@ export async function listPurchasesByEmail(email: string) {
   const { data, error } = await supabase
     .from("purchases")
     .select("*")
-    .eq("email", email.toLowerCase().trim())
+    .eq("email", normalizeEmail(email))
     .eq("status", "completed")
     .order("created_at", { ascending: false });
   if (error) return { ok: false as const, reason: error.message };

@@ -77,7 +77,8 @@ export async function POST(req: Request) {
             typeof session.payment_intent === "string"
               ? session.payment_intent
               : null,
-          amount: session.amount_total ?? 1000,
+          // null フォールバックを 0 に（¥1000 デフォルトを廃止：実額が取れないまま保存しない）
+          amount: session.amount_total ?? 0,
           currency: session.currency ?? "jpy",
         });
         if (!result.ok) {
